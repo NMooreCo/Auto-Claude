@@ -18,6 +18,7 @@ import { Textarea } from '../ui/textarea';
 import { Checkbox } from '../ui/checkbox';
 import { AgentProfileSelector } from '../AgentProfileSelector';
 import { ClassificationFields } from './ClassificationFields';
+import { ContentTaskFields } from './ContentTaskFields';
 import { useImageUpload, type FileReferenceData } from './useImageUpload';
 import { cn } from '../../lib/utils';
 import type {
@@ -27,8 +28,10 @@ import type {
   TaskImpact,
   ImageAttachment,
   ModelType,
-  ThinkingLevel
+  ThinkingLevel,
+  ContentProjectType
 } from '../../../shared/types';
+import { CONTENT_CATEGORIES } from '../../../shared/types/task';
 import type { PhaseModelConfig, PhaseThinkingConfig } from '../../../shared/types/settings';
 
 interface TaskFormFieldsProps {
@@ -68,6 +71,14 @@ interface TaskFormFieldsProps {
   onImpactChange: (value: TaskImpact | '') => void;
   showClassification: boolean;
   onShowClassificationChange: (show: boolean) => void;
+
+  // Content Mode fields (for creative/documentation tasks)
+  contentProjectType?: ContentProjectType | '';
+  contentTargetAudience?: string;
+  contentType?: string;
+  onContentProjectTypeChange?: (value: ContentProjectType | '') => void;
+  onContentTargetAudienceChange?: (value: string) => void;
+  onContentTypeChange?: (value: string) => void;
 
   // Images
   images: ImageAttachment[];
@@ -120,6 +131,12 @@ export function TaskFormFields({
   onImpactChange,
   showClassification,
   onShowClassificationChange,
+  contentProjectType = '',
+  contentTargetAudience = '',
+  contentType = '',
+  onContentProjectTypeChange,
+  onContentTargetAudienceChange,
+  onContentTypeChange,
   images,
   onImagesChange,
   requireReviewBeforeCoding,
@@ -316,6 +333,20 @@ export function TaskFormFields({
             idPrefix={idPrefix}
           />
         </div>
+      )}
+
+      {/* Content Task Fields - shown when category is content-related */}
+      {category && CONTENT_CATEGORIES.includes(category) && onContentProjectTypeChange && onContentTargetAudienceChange && onContentTypeChange && (
+        <ContentTaskFields
+          projectType={contentProjectType}
+          targetAudience={contentTargetAudience}
+          contentType={contentType}
+          onProjectTypeChange={onContentProjectTypeChange}
+          onTargetAudienceChange={onContentTargetAudienceChange}
+          onContentTypeChange={onContentTypeChange}
+          disabled={disabled}
+          idPrefix={idPrefix}
+        />
       )}
 
       {/* Review Requirement Toggle */}

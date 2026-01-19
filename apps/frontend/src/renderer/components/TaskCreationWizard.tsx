@@ -24,7 +24,7 @@ import { FileAutocomplete } from './FileAutocomplete';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import { cn } from '../lib/utils';
-import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile } from '../../shared/types';
+import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile, ContentProjectType } from '../../shared/types';
 import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -99,6 +99,11 @@ export function TaskCreationWizard({
   const [complexity, setComplexity] = useState<TaskComplexity | ''>('');
   const [impact, setImpact] = useState<TaskImpact | ''>('');
 
+  // Content Mode fields (for creative/documentation tasks)
+  const [contentProjectType, setContentProjectType] = useState<ContentProjectType | ''>('');
+  const [contentTargetAudience, setContentTargetAudience] = useState('');
+  const [contentType, setContentType] = useState('');
+
   // Model configuration
   const [profileId, setProfileId] = useState<string>(settings.selectedAgentProfile || 'auto');
   const [model, setModel] = useState<ModelType | ''>(selectedProfile.model);
@@ -155,6 +160,10 @@ export function TaskCreationWizard({
         setImages(draft.images);
         setReferencedFiles(draft.referencedFiles ?? []);
         setRequireReviewBeforeCoding(draft.requireReviewBeforeCoding ?? false);
+        // Content Mode fields
+        setContentProjectType(draft.contentProjectType ?? '');
+        setContentTargetAudience(draft.contentTargetAudience ?? '');
+        setContentType(draft.contentType ?? '');
         setIsDraftRestored(true);
 
         if (draft.category || draft.priority || draft.complexity || draft.impact) {
@@ -177,6 +186,10 @@ export function TaskCreationWizard({
         setImages([]);
         setReferencedFiles([]);
         setRequireReviewBeforeCoding(false);
+        // Content Mode fields reset
+        setContentProjectType('');
+        setContentTargetAudience('');
+        setContentType('');
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
         setIsDraftRestored(false);
@@ -252,8 +265,12 @@ export function TaskCreationWizard({
     images,
     referencedFiles,
     requireReviewBeforeCoding,
+    // Content Mode fields
+    contentProjectType,
+    contentTargetAudience,
+    contentType,
     savedAt: new Date()
-  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding]);
+  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding, contentProjectType, contentTargetAudience, contentType]);
 
   /**
    * Detect @ mention being typed and show autocomplete
@@ -422,6 +439,10 @@ export function TaskCreationWizard({
       if (images.length > 0) metadata.attachedImages = images;
       if (allReferencedFiles.length > 0) metadata.referencedFiles = allReferencedFiles;
       if (requireReviewBeforeCoding) metadata.requireReviewBeforeCoding = true;
+      // Content Mode fields (for creative/documentation tasks)
+      if (contentProjectType) metadata.contentProjectType = contentProjectType;
+      if (contentTargetAudience) metadata.contentTargetAudience = contentTargetAudience;
+      if (contentType) metadata.contentType = contentType;
       // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
       // This ensures the backend always knows which branch to use for worktree creation
       if (baseBranch === PROJECT_DEFAULT_BRANCH) {
@@ -463,6 +484,10 @@ export function TaskCreationWizard({
     setImages([]);
     setReferencedFiles([]);
     setRequireReviewBeforeCoding(false);
+    // Content Mode fields reset
+    setContentProjectType('');
+    setContentTargetAudience('');
+    setContentType('');
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
     setError(null);
@@ -641,6 +666,12 @@ export function TaskCreationWizard({
           onImpactChange={setImpact}
           showClassification={showClassification}
           onShowClassificationChange={setShowClassification}
+          contentProjectType={contentProjectType}
+          contentTargetAudience={contentTargetAudience}
+          contentType={contentType}
+          onContentProjectTypeChange={setContentProjectType}
+          onContentTargetAudienceChange={setContentTargetAudience}
+          onContentTypeChange={setContentType}
           images={images}
           onImagesChange={setImages}
           requireReviewBeforeCoding={requireReviewBeforeCoding}

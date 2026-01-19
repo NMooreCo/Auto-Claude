@@ -97,7 +97,7 @@ This journal tracks all development work on the Creative/Content Mode feature fo
 | 3 | Content Runner CLI | Completed | PR #2 |
 | 4 | Integration with spec_runner.py | Completed | PR #3 |
 | 5 | Project Templates | Completed | PR #2 |
-| 6 | Frontend Integration | **Not Started** | - |
+| 6 | Frontend Integration | Completed | PR #3 |
 | 7 | i18n Translations | Completed | PR #3 |
 | 8 | Testing | Completed | PR #2 |
 
@@ -206,7 +206,7 @@ class WorkflowType(str, Enum):
 ---
 
 ### Phase 6: Frontend Integration
-**Status**: Not Started
+**Status**: Completed (2026-01-19)
 **Priority**: Medium
 **Depends On**: Phase 4 (backend must route content tasks first)
 
@@ -557,6 +557,60 @@ Based on dependencies and risk, implement in this order:
 - `form.classification.values.category.worldbuilding` - Worldbuilding category
 - `form.classification.values.category.content_docs` - Content Docs category
 - `form.content.*` - All content mode form fields
+
+---
+
+### 2026-01-19 - Phase 6 Implementation
+
+**Session Branch**: `claude/creative-mode-planning-VrGAe`
+
+**Work Done**:
+- Implemented Phase 6: Frontend Integration
+- Added content types to `shared/types/task.ts`:
+  - Extended `TaskCategory` with content categories: `creative`, `game_design`, `worldbuilding`, `content_docs`
+  - Added `ContentProjectType` type for project type selection
+  - Added `CONTENT_CATEGORIES` constant for UI logic
+  - Added content fields to `TaskMetadata`: `contentProjectType`, `contentTargetAudience`, `contentType`
+  - Added content fields to `TaskDraft` for draft persistence
+- Updated `ClassificationFields.tsx`:
+  - Added content categories to `CATEGORY_OPTIONS` array
+- Created `ContentTaskFields.tsx` component:
+  - Project type dropdown (card_game, board_game, ttrpg, etc.)
+  - Target audience text input
+  - Content type text input
+  - Uses i18n translations from Phase 7
+- Updated `TaskFormFields.tsx`:
+  - Added conditional rendering for `ContentTaskFields`
+  - Appears when category is one of `CONTENT_CATEGORIES`
+  - Added props for content field state management
+- Updated `TaskCreationWizard.tsx`:
+  - Added state for content fields
+  - Added draft save/restore for content fields
+  - Pass content fields to metadata on task creation
+- Updated `TaskEditDialog.tsx`:
+  - Added state for content fields
+  - Load/save content fields from task metadata
+  - Change detection for content fields
+
+**Files Created**:
+- `apps/frontend/src/renderer/components/task-form/ContentTaskFields.tsx`
+
+**Files Modified**:
+- `apps/frontend/src/shared/types/task.ts` - Added content types and fields
+- `apps/frontend/src/renderer/components/task-form/ClassificationFields.tsx` - Added content categories
+- `apps/frontend/src/renderer/components/task-form/TaskFormFields.tsx` - Added ContentTaskFields integration
+- `apps/frontend/src/renderer/components/TaskCreationWizard.tsx` - Added content field state
+- `apps/frontend/src/renderer/components/TaskEditDialog.tsx` - Added content field support
+
+**UI Flow**:
+1. User opens task creation wizard
+2. User selects category (e.g., "Creative" or "Game Design")
+3. Content Task Fields section appears with:
+   - Project Type dropdown
+   - Target Audience input
+   - Content Type input
+4. These fields are saved to task metadata
+5. Backend routes to content_runner when task starts
 
 ---
 

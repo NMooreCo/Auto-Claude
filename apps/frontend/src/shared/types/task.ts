@@ -154,6 +154,10 @@ export interface TaskDraft {
   images: ImageAttachment[];
   referencedFiles: ReferencedFile[];
   requireReviewBeforeCoding?: boolean;
+  // Content Mode fields (for creative/documentation tasks)
+  contentProjectType?: ContentProjectType | '';
+  contentTargetAudience?: string;
+  contentType?: string;
   savedAt: Date;
 }
 
@@ -173,7 +177,27 @@ export type TaskCategory =
   | 'performance'
   | 'ui_ux'
   | 'infrastructure'
-  | 'testing';
+  | 'testing'
+  // Content Mode categories (Creative Mode)
+  | 'creative'
+  | 'game_design'
+  | 'worldbuilding'
+  | 'content_docs';
+
+// Content Mode project types (for creative/documentation tasks)
+export type ContentProjectType =
+  | 'card_game'
+  | 'board_game'
+  | 'ttrpg'
+  | 'worldbuilding'
+  | 'fiction'
+  | 'business'
+  | 'codebase_docs'
+  | 'api_docs'
+  | 'general';
+
+// Categories that trigger Content Mode UI fields
+export const CONTENT_CATEGORIES: TaskCategory[] = ['creative', 'game_design', 'worldbuilding', 'content_docs'];
 
 export interface TaskMetadata {
   // Origin tracking
@@ -224,6 +248,11 @@ export interface TaskMetadata {
 
   // Review settings
   requireReviewBeforeCoding?: boolean;  // Require human review of spec/plan before coding starts
+
+  // Content Mode fields (for creative/documentation tasks)
+  contentProjectType?: ContentProjectType;  // Type of content project (card_game, fiction, etc.)
+  contentTargetAudience?: string;  // Target audience for the content
+  contentType?: string;  // Specific type of content being created
 
   // Agent configuration (from agent profile or manual selection)
   model?: ModelType;  // Claude model to use (haiku, sonnet, opus) - used when not auto profile

@@ -282,12 +282,14 @@ Examples:
                 from content_runner import cmd_plan
 
                 # Create args namespace for content_runner
+                # Pass existing spec_dir if provided (from frontend)
                 import argparse as _argparse
 
                 content_args = _argparse.Namespace(
                     project=str(project_dir),
                     task=task_description,
                     spec=None,
+                    spec_dir=str(args.spec_dir) if args.spec_dir else None,
                 )
 
                 debug(

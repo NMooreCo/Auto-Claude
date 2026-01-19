@@ -128,8 +128,32 @@ def cmd_plan(args) -> int:
 
     print(f"Detected project type: {project_type.value}")
 
-    # Create spec directory
-    spec_dir = project_dir / ".auto-claude" / "specs" / "content-001"
+    # Use existing spec directory if provided, otherwise create new one
+    if hasattr(args, 'spec_dir') and args.spec_dir:
+        spec_dir = Path(args.spec_dir).resolve()
+        print(f"Using existing spec directory: {spec_dir}")
+    elif hasattr(args, 'spec') and args.spec:
+        spec_dir = get_spec_dir(project_dir, args.spec)
+    else:
+        # Create new spec directory with incremental numbering
+        specs_dir = project_dir / ".auto-claude" / "specs"
+        specs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Find next available content spec number
+        existing = list(specs_dir.glob("content-*"))
+        next_num = 1
+        if existing:
+            nums = []
+            for d in existing:
+                try:
+                    nums.append(int(d.name.split("-")[1]))
+                except (IndexError, ValueError):
+                    pass
+            if nums:
+                next_num = max(nums) + 1
+
+        spec_dir = specs_dir / f"content-{next_num:03d}"
+
     spec_dir.mkdir(parents=True, exist_ok=True)
 
     # Save the brief

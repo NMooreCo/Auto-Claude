@@ -84,6 +84,23 @@ This journal tracks all development work on the Creative/Content Mode feature fo
 | `api_docs` | API endpoint documentation |
 | `general` | Any creative content |
 
+**Original Implementation Plan**: See `guides/content-mode-implementation-plan.md` for detailed design.
+
+---
+
+## Phase Status Overview
+
+| Phase | Description | Status | PR |
+|-------|-------------|--------|-----|
+| 1 | Core Enums and Models | Completed | PR #2 |
+| 2 | Content Agents | Completed | PR #2 |
+| 3 | Content Runner CLI | Completed | PR #2 |
+| 4 | Integration with spec_runner.py | **Not Started** | - |
+| 5 | Project Templates | Completed | PR #2 |
+| 6 | Frontend Integration | **Not Started** | - |
+| 7 | i18n Translations | **Not Started** | - |
+| 8 | Testing | Completed | PR #2 |
+
 ---
 
 ## Remaining Work
@@ -473,6 +490,7 @@ Based on dependencies and risk, implement in this order:
 
 **Files Reviewed**:
 - `guides/content-mode-summary.md` - Feature documentation
+- `guides/content-mode-implementation-plan.md` - Original design document (8 phases)
 - `apps/backend/spec/complexity.py` - Complexity analysis (extend for content)
 - `apps/backend/runners/spec_runner.py` - Main entry point (add content routing)
 - `apps/backend/implementation_plan/enums.py` - Workflow types (add content types)

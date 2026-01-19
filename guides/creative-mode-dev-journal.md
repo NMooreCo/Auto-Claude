@@ -98,7 +98,7 @@ This journal tracks all development work on the Creative/Content Mode feature fo
 | 4 | Integration with spec_runner.py | Completed | PR #3 |
 | 5 | Project Templates | Completed | PR #2 |
 | 6 | Frontend Integration | **Not Started** | - |
-| 7 | i18n Translations | **Not Started** | - |
+| 7 | i18n Translations | Completed | PR #3 |
 | 8 | Testing | Completed | PR #2 |
 
 ---
@@ -337,7 +337,7 @@ export function ContentTaskFields({
 ---
 
 ### Phase 7: i18n Translations
-**Status**: Not Started
+**Status**: Completed (2026-01-19)
 **Priority**: Medium (blocks Phase 6 frontend work)
 
 **Goal**: Add translation keys for content mode UI
@@ -531,6 +531,32 @@ Based on dependencies and risk, implement in this order:
 - `apps/backend/implementation_plan/enums.py` - Added 4 content workflow types
 - `apps/backend/spec/complexity.py` - Added content detection methods
 - `apps/backend/runners/spec_runner.py` - Added content routing logic
+
+---
+
+### 2026-01-19 - Phase 7 Implementation
+
+**Session Branch**: `claude/creative-mode-planning-VrGAe`
+
+**Work Done**:
+- Implemented Phase 7: i18n Translations
+- Added content category translations to both English and French:
+  - `creative`, `game_design`, `worldbuilding`, `content_docs`
+- Added new `form.content` section with:
+  - Project type labels and placeholders
+  - Target audience fields
+  - All 9 project type translations
+
+**Files Modified**:
+- `apps/frontend/src/shared/i18n/locales/en/tasks.json` - English translations
+- `apps/frontend/src/shared/i18n/locales/fr/tasks.json` - French translations
+
+**Translation Keys Added**:
+- `form.classification.values.category.creative` - Creative category
+- `form.classification.values.category.game_design` - Game Design category
+- `form.classification.values.category.worldbuilding` - Worldbuilding category
+- `form.classification.values.category.content_docs` - Content Docs category
+- `form.content.*` - All content mode form fields
 
 ---
 

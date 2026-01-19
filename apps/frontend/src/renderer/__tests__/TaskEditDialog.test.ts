@@ -313,6 +313,177 @@ describe('TaskEditDialog Logic', () => {
     });
   });
 
+  describe('Content Mode Fields', () => {
+    it('should detect when contentProjectType has changed', () => {
+      const originalContentProjectType = 'card_game';
+      const newContentProjectType = 'ttrpg';
+
+      const hasChanges = newContentProjectType !== originalContentProjectType;
+      expect(hasChanges).toBe(true);
+    });
+
+    it('should detect when contentTargetAudience has changed', () => {
+      const originalTargetAudience = 'Card collectors';
+      const newTargetAudience = 'Game Masters';
+
+      const hasChanges = newTargetAudience !== originalTargetAudience;
+      expect(hasChanges).toBe(true);
+    });
+
+    it('should detect when contentType has changed', () => {
+      const originalContentType = 'Creature cards';
+      const newContentType = 'Spell cards';
+
+      const hasChanges = newContentType !== originalContentType;
+      expect(hasChanges).toBe(true);
+    });
+
+    it('should detect no changes when content fields are same', () => {
+      const original = {
+        contentProjectType: 'card_game',
+        contentTargetAudience: 'Card collectors',
+        contentType: 'Creature cards'
+      };
+      const current = { ...original };
+
+      const hasChanges =
+        current.contentProjectType !== original.contentProjectType ||
+        current.contentTargetAudience !== original.contentTargetAudience ||
+        current.contentType !== original.contentType;
+
+      expect(hasChanges).toBe(false);
+    });
+
+    it('should handle empty content fields', () => {
+      const original = {
+        contentProjectType: '',
+        contentTargetAudience: '',
+        contentType: ''
+      };
+      const current = { ...original };
+
+      const hasChanges =
+        current.contentProjectType !== original.contentProjectType ||
+        current.contentTargetAudience !== original.contentTargetAudience ||
+        current.contentType !== original.contentType;
+
+      expect(hasChanges).toBe(false);
+    });
+
+    it('should detect changes from empty to value', () => {
+      const original = {
+        contentProjectType: '' as string,
+        contentTargetAudience: '',
+        contentType: ''
+      };
+      const current = {
+        contentProjectType: 'worldbuilding',
+        contentTargetAudience: 'Fantasy writers',
+        contentType: 'Region descriptions'
+      };
+
+      const hasChanges =
+        current.contentProjectType !== original.contentProjectType ||
+        current.contentTargetAudience !== original.contentTargetAudience ||
+        current.contentType !== original.contentType;
+
+      expect(hasChanges).toBe(true);
+    });
+
+    it('should handle undefined metadata content fields', () => {
+      const task = createTestTask({
+        metadata: {}
+      });
+
+      const contentProjectType = task.metadata?.contentProjectType || '';
+      const contentTargetAudience = task.metadata?.contentTargetAudience || '';
+      const contentType = task.metadata?.contentType || '';
+
+      expect(contentProjectType).toBe('');
+      expect(contentTargetAudience).toBe('');
+      expect(contentType).toBe('');
+    });
+
+    it('should preserve existing content fields in metadata', () => {
+      const task = createTestTask({
+        metadata: {
+          contentProjectType: 'fiction',
+          contentTargetAudience: 'Young adult readers',
+          contentType: 'Character backstories'
+        }
+      });
+
+      expect(task.metadata?.contentProjectType).toBe('fiction');
+      expect(task.metadata?.contentTargetAudience).toBe('Young adult readers');
+      expect(task.metadata?.contentType).toBe('Character backstories');
+    });
+
+    it('should include content fields in full change detection', () => {
+      // Simulate the full hasChanges logic from TaskEditDialog
+      const originalTask = createTestTask({
+        title: 'Original Title',
+        description: 'Original description',
+        metadata: {
+          category: 'creative',
+          contentProjectType: 'card_game',
+          contentTargetAudience: 'Collectors',
+          contentType: 'Cards'
+        }
+      });
+
+      const currentState = {
+        title: 'Original Title',
+        description: 'Original description',
+        category: 'creative',
+        contentProjectType: 'ttrpg', // Changed!
+        contentTargetAudience: 'Collectors',
+        contentType: 'Cards'
+      };
+
+      const hasChanges =
+        currentState.title.trim() !== originalTask.title ||
+        currentState.description.trim() !== originalTask.description ||
+        currentState.category !== (originalTask.metadata?.category || '') ||
+        currentState.contentProjectType !== (originalTask.metadata?.contentProjectType || '') ||
+        currentState.contentTargetAudience !== (originalTask.metadata?.contentTargetAudience || '') ||
+        currentState.contentType !== (originalTask.metadata?.contentType || '');
+
+      expect(hasChanges).toBe(true);
+    });
+
+    it('should detect no changes when all fields match including content fields', () => {
+      const originalTask = createTestTask({
+        title: 'My Task',
+        description: 'My description',
+        metadata: {
+          category: 'game_design',
+          contentProjectType: 'board_game',
+          contentTargetAudience: 'Board game enthusiasts',
+          contentType: 'Game rules'
+        }
+      });
+
+      const currentState = {
+        title: 'My Task',
+        description: 'My description',
+        category: 'game_design',
+        contentProjectType: 'board_game',
+        contentTargetAudience: 'Board game enthusiasts',
+        contentType: 'Game rules'
+      };
+
+      const hasChanges =
+        currentState.title.trim() !== originalTask.title ||
+        currentState.description.trim() !== originalTask.description ||
+        currentState.category !== (originalTask.metadata?.category || '') ||
+        currentState.contentProjectType !== (originalTask.metadata?.contentProjectType || '') ||
+        currentState.contentTargetAudience !== (originalTask.metadata?.contentTargetAudience || '') ||
+        currentState.contentType !== (originalTask.metadata?.contentType || '');
+
+      expect(hasChanges).toBe(false);
+    });
+  });
+
   describe('persistUpdateTask', () => {
     it('should call electronAPI.updateTask with correct parameters', async () => {
       const task = createTestTask({ id: 'task-1', title: 'Original' });

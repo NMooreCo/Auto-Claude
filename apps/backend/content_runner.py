@@ -133,8 +133,9 @@ def cmd_plan(args) -> int:
     print(f"Detected project type: {project_type.value}")
 
     # Use provided spec directory or create one
-    if args.spec_dir:
-        spec_dir = Path(args.spec_dir).resolve()
+    spec_dir_arg = getattr(args, 'spec_dir', None)
+    if spec_dir_arg:
+        spec_dir = Path(spec_dir_arg).resolve()
         if not spec_dir.exists():
             print(f"Error: Spec directory does not exist: {spec_dir}")
             return 1

@@ -466,6 +466,122 @@ Auto-Claude/
 
 ---
 
+## Key Design Decisions
+
+Understanding _why_ the architecture is designed this way helps when extending it:
+
+### 1. Claude Agent SDK (Not Raw Anthropic API)
+
+All AI interactions go through the Claude Agent SDK (`claude-agent-sdk` package):
+
+```python
+# ✅ CORRECT - Use create_client()
+from core.client import create_client
+client = create_client(project_dir, spec_dir, model, agent_type="coder")
+
+# ❌ WRONG - Never use raw Anthropic API
+# import anthropic
+# client = anthropic.Anthropic()
+```
+
+**Why?** The SDK provides:
+- Pre-configured security (sandbox, allowlists, hooks)
+- Automatic MCP server integration (Context7, Linear, Graphiti, Electron)
+- Tool permissions based on agent role
+- Session management and recovery
+- Unified API across all agent types
+
+### 2. Git Worktree Isolation
+
+Every spec runs in an isolated Git worktree:
+
+```
+your-project/
+├── .git/                      # Main repo
+├── src/                       # Your code
+└── .auto-claude/
+    └── worktrees/
+        └── 001-add-auth/      # Isolated worktree for this spec
+            ├── .git/          # Linked to main repo
+            └── src/           # Copy of your code (changes here)
+```
+
+**Why?**
+- **Safety**: Unreviewed AI changes never affect your main branch
+- **Easy Discard**: Don't like the changes? Delete the worktree
+- **Clean Merge**: Merge only when you're satisfied
+- **Parallel Work**: Multiple specs can run simultaneously
+
+### 3. Complexity-Adaptive Spec Creation
+
+AI evaluates task complexity to choose appropriate pipeline depth:
+
+| Complexity | Phases | Use Case |
+|------------|--------|----------|
+| SIMPLE | 3 | Quick fixes, typos (1-2 files) |
+| STANDARD | 6-7 | Features, refactoring (3-10 files) |
+| COMPLEX | 8 | Architecture changes (10+ files) |
+
+**Why?**
+- Simple tasks don't need extensive research phases
+- Complex integrations benefit from self-critique
+- Reduces API costs and time for simple tasks
+
+### 4. Subtask-Based Implementation
+
+The coder implements one subtask at a time (not the entire feature at once):
+
+```
+implementation_plan.json:
+├── Phase 1: Backend
+│   ├── subtask-1-1: Create database model    ← Coder works on this
+│   ├── subtask-1-2: Add API endpoint         ← Then this
+│   └── subtask-1-3: Write tests              ← Then this
+└── Phase 2: Frontend
+    └── subtask-2-1: Add UI component         ← Then this
+```
+
+**Why?**
+- **Smaller context**: Each subtask has focused instructions
+- **Incremental commits**: Easy to review and rollback
+- **Recovery**: If stuck on subtask 3, subtasks 1-2 are already done
+- **Parallelization**: Subagents can work on independent subtasks
+
+### 5. Memory-Enabled Agents (Graphiti)
+
+Agents have access to Graphiti memory for cross-session context:
+
+```python
+# In coder.py
+graphiti_context = await get_graphiti_context(spec_dir, project_dir, subtask)
+if graphiti_context:
+    prompt += "\n\n" + graphiti_context
+```
+
+**Why?**
+- Learn from previous builds (patterns, gotchas)
+- Remember project-specific conventions
+- Improve over time with accumulated knowledge
+
+### 6. Human-in-the-Loop at Key Points
+
+Humans maintain control at critical junctions:
+
+```
+Spec Creation     → Human reviews spec before build
+Build Complete    → Human reviews changes before merge
+QA Rejected       → Human can override or provide feedback
+Merge             → Human explicitly requests merge
+```
+
+**Why?**
+- AI is powerful but not infallible
+- Maintains developer ownership of codebase
+- Catches edge cases AI might miss
+- Provides learning feedback to improve future runs
+
+---
+
 ## Next Steps
 
 - **New Contributors**: Start with [CONTRIBUTING.md](../CONTRIBUTING.md) for setup instructions

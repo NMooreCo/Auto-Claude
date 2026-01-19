@@ -92,8 +92,8 @@ python content_runner.py --project ./my-card-game --task "Create 5 water element
 # Execute existing plan
 python content_runner.py --project ./my-card-game --spec content-001 --execute
 
-# List all content specs
-python content_runner.py --project ./my-card-game --list
+# List all content specs (manually)
+ls .auto-claude/specs/content-*
 ```
 
 ---

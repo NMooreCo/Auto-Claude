@@ -353,32 +353,38 @@ rm -rf /tmp/test-card-game
 
 ---
 
-## Test 10: List Content Specs
+## Test 10: Verify Content Spec Directory
 
-**Purpose:** Verify spec listing works for content projects.
+**Purpose:** Verify content specs are stored correctly.
 
 ### Steps
 
 ```bash
 cd apps/backend
 
-# After creating some content specs
-python content_runner.py --project /home/user/Auto-Claude --list
+# After creating a content spec, check the directory structure
+ls -la /home/user/Auto-Claude/.auto-claude/specs/content-*/
+
+# View content plan structure
+cat /home/user/Auto-Claude/.auto-claude/specs/content-*/content_plan.json | head -30
 ```
 
 ### Expected Results
 
-```
-Content Specs for /home/user/Auto-Claude:
-  content-001: Architecture Overview (codebase_docs) - pending
-  content-002: API Reference (codebase_docs) - pending
-```
+Content spec directory should contain:
+- `content_plan.json` - The content plan with phases and subtasks
+- Additional files created during execution
 
 ### Verification
 
-- [ ] Command runs without error
-- [ ] Lists all content specs
-- [ ] Shows project type and status
+- [ ] Spec directory created with `content-` prefix
+- [ ] `content_plan.json` exists with valid JSON
+- [ ] Plan contains project_type, workflow_type, phases
+
+### Note
+
+The `--list` flag is documented but not yet implemented in content_runner.py.
+Use `ls .auto-claude/specs/content-*` to list content specs manually.
 
 ---
 
@@ -450,6 +456,39 @@ Create 5 water element creature cards for a Pokemon-style card game:
 - 1 legendary creature
 Include mana costs, HP, and abilities.
 ```
+
+---
+
+## Known Issues & Gaps
+
+Issues discovered during testing:
+
+### 1. Detection Threshold Too High
+
+Some documentation tasks aren't detected as content tasks because `is_content_task()` requires `content_score > code_score + 1`.
+
+**Examples that fail detection:**
+- "Document the architecture" (1 content keyword)
+- "Write a README for the project" (1 content keyword)
+- "Generate API docs for the backend" (contains "api" which is in CODE_TASK_KEYWORDS)
+
+**Workaround:** Use more descriptive task text with multiple content keywords:
+- "Create comprehensive documentation for the codebase architecture" ✅
+- "Write a developer guide with setup instructions" ✅
+
+### 2. `--list` Flag Not Implemented
+
+The `--list` flag is documented but not implemented in `content_runner.py`.
+
+**Workaround:** Use `ls .auto-claude/specs/content-*` to list content specs.
+
+### 3. Project Type Detection
+
+Auto-Claude codebase is detected as `knowledge_base` (not `codebase_docs`) because:
+- Has `guides/` directory which matches knowledge_base indicators
+- Missing `docs/api/` or `docs/architecture/` directories that would match codebase_docs
+
+This is acceptable behavior - knowledge_base is a valid type for this use case.
 
 ---
 

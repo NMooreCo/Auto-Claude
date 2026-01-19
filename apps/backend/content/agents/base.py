@@ -74,8 +74,8 @@ class ContentAgent(ABC):
         from core.client import create_client
 
         return create_client(
-            project_dir=str(self.project_dir),
-            spec_dir=str(self.spec_dir) if self.spec_dir else None,
+            project_dir=self.project_dir,
+            spec_dir=self.spec_dir if self.spec_dir else self.project_dir,
             model=self.model,
             agent_type=self.AGENT_TYPE,
         )

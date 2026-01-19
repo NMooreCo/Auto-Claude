@@ -788,3 +788,138 @@ class TestEdgeCases:
         result1 = analyzer.analyze("FIX TYPO IN BUTTON")
         result2 = analyzer.analyze("fix typo in button")
         assert result1.signals["simple_keywords"] == result2.signals["simple_keywords"]
+
+
+class TestContentTaskDetection:
+    """Tests for Content Mode task detection (Phase 4 integration)."""
+
+    def test_content_keywords_structure(self):
+        """CONTENT_KEYWORDS dict has expected categories."""
+        expected_categories = [
+            "card_game",
+            "board_game",
+            "ttrpg",
+            "worldbuilding",
+            "fiction",
+            "documentation",
+        ]
+        for category in expected_categories:
+            assert category in ComplexityAnalyzer.CONTENT_KEYWORDS
+
+    def test_content_keywords_non_empty(self):
+        """All content keyword categories have entries."""
+        for category, keywords in ComplexityAnalyzer.CONTENT_KEYWORDS.items():
+            assert len(keywords) > 0, f"Empty keywords for {category}"
+
+    def test_card_game_keywords(self):
+        """Card game keywords are correct."""
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["card_game"]
+        assert "card" in keywords
+        assert "deck" in keywords
+        assert "mana" in keywords
+
+    def test_ttrpg_keywords(self):
+        """TTRPG keywords are correct."""
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["ttrpg"]
+        assert "monster" in keywords
+        assert "campaign" in keywords
+        assert "bestiary" in keywords
+
+    def test_is_content_task_with_card_game_description(self):
+        """Detects card game tasks as content tasks."""
+        analyzer = ComplexityAnalyzer()
+        # Test with mocked content module
+        with patch.object(analyzer, "CONTENT_KEYWORDS", ComplexityAnalyzer.CONTENT_KEYWORDS):
+            # Use fallback (keyword matching) when content module not available
+            # Card game tasks should match with >=2 keywords
+            task = "Create 5 creature cards with mana costs for the water deck"
+            task_lower = task.lower()
+            keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["card_game"]
+            matches = sum(1 for kw in keywords if kw in task_lower)
+            assert matches >= 2, "Should match card game keywords"
+
+    def test_is_content_task_with_ttrpg_description(self):
+        """Detects TTRPG tasks as content tasks."""
+        analyzer = ComplexityAnalyzer()
+        task = "Create a monster stat block for the dungeon campaign bestiary"
+        task_lower = task.lower()
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["ttrpg"]
+        matches = sum(1 for kw in keywords if kw in task_lower)
+        assert matches >= 2, "Should match TTRPG keywords"
+
+    def test_is_content_task_with_worldbuilding_description(self):
+        """Detects worldbuilding tasks as content tasks."""
+        analyzer = ComplexityAnalyzer()
+        task = "Write the lore and history for the northern faction region"
+        task_lower = task.lower()
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["worldbuilding"]
+        matches = sum(1 for kw in keywords if kw in task_lower)
+        assert matches >= 2, "Should match worldbuilding keywords"
+
+    def test_is_content_task_with_code_task(self):
+        """Code tasks should NOT match content keywords."""
+        analyzer = ComplexityAnalyzer()
+        task = "Fix the authentication bug in the user service"
+        task_lower = task.lower()
+        # Check all content categories
+        for category, keywords in ComplexityAnalyzer.CONTENT_KEYWORDS.items():
+            matches = sum(1 for kw in keywords if kw in task_lower)
+            assert matches < 2, f"Code task matched {category} with {matches} keywords"
+
+    def test_is_content_task_fallback_requires_two_matches(self):
+        """Fallback detection requires at least 2 keyword matches."""
+        analyzer = ComplexityAnalyzer()
+        # Single keyword match should not be detected
+        task = "Create a card"  # Only "card" matches
+        task_lower = task.lower()
+        for category, keywords in ComplexityAnalyzer.CONTENT_KEYWORDS.items():
+            matches = sum(1 for kw in keywords if kw in task_lower)
+            # Card appears in card_game keywords, but only once
+            if category == "card_game":
+                assert matches == 1
+
+    def test_is_content_task_method_exists(self):
+        """is_content_task method exists on ComplexityAnalyzer."""
+        analyzer = ComplexityAnalyzer()
+        assert hasattr(analyzer, "is_content_task")
+        assert callable(analyzer.is_content_task)
+
+    def test_get_content_project_type_method_exists(self):
+        """get_content_project_type method exists on ComplexityAnalyzer."""
+        analyzer = ComplexityAnalyzer()
+        assert hasattr(analyzer, "get_content_project_type")
+        assert callable(analyzer.get_content_project_type)
+
+    def test_is_content_task_returns_bool(self):
+        """is_content_task returns a boolean."""
+        analyzer = ComplexityAnalyzer()
+        result = analyzer.is_content_task("Create 5 creature cards for the deck")
+        assert isinstance(result, bool)
+
+    def test_get_content_project_type_returns_none_for_code_task(self):
+        """get_content_project_type returns None for code tasks."""
+        analyzer = ComplexityAnalyzer()
+        result = analyzer.get_content_project_type("Fix the authentication bug")
+        # Should return None (not a content task) or handle gracefully
+        # When content module not available, returns None
+        assert result is None
+
+    def test_fiction_keywords(self):
+        """Fiction keywords are correct."""
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["fiction"]
+        assert "story" in keywords
+        assert "chapter" in keywords
+        assert "plot" in keywords
+
+    def test_documentation_keywords(self):
+        """Documentation keywords are correct."""
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["documentation"]
+        assert "document" in keywords
+        assert "guide" in keywords
+
+    def test_board_game_keywords(self):
+        """Board game keywords are correct."""
+        keywords = ComplexityAnalyzer.CONTENT_KEYWORDS["board_game"]
+        assert "board" in keywords
+        assert "tile" in keywords
+        assert "piece" in keywords

@@ -6,6 +6,7 @@ Detailed documentation for Auto Claude setup and usage.
 
 | Guide | Description |
 |-------|-------------|
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | High-level system architecture, agent pipeline, and IPC patterns |
 | **[CLI-USAGE.md](CLI-USAGE.md)** | Terminal-only usage for power users, headless servers, and CI/CD |
 
 ## Quick Links

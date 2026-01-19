@@ -95,7 +95,7 @@ This journal tracks all development work on the Creative/Content Mode feature fo
 | 1 | Core Enums and Models | Completed | PR #2 |
 | 2 | Content Agents | Completed | PR #2 |
 | 3 | Content Runner CLI | Completed | PR #2 |
-| 4 | Integration with spec_runner.py | **Not Started** | - |
+| 4 | Integration with spec_runner.py | Completed | PR #3 |
 | 5 | Project Templates | Completed | PR #2 |
 | 6 | Frontend Integration | **Not Started** | - |
 | 7 | i18n Translations | **Not Started** | - |
@@ -106,7 +106,7 @@ This journal tracks all development work on the Creative/Content Mode feature fo
 ## Remaining Work
 
 ### Phase 4: Integration with spec_runner.py
-**Status**: Not Started
+**Status**: Completed (2026-01-19)
 **Priority**: High
 
 **Goal**: Auto-route content tasks to Content Mode instead of code pipeline
@@ -497,10 +497,40 @@ Based on dependencies and risk, implement in this order:
 - `apps/backend/content_runner.py` - Content mode CLI (already complete)
 
 **Next Steps**:
-1. Start Phase 4 implementation (spec_runner integration)
-2. Test content task detection with real project directories
+1. ~~Start Phase 4 implementation (spec_runner integration)~~ - DONE
+2. ~~Test content task detection with real project directories~~ - DONE
 3. Add i18n translations (Phase 7)
 4. Implement frontend changes (Phase 6) after backend works
+
+---
+
+### 2026-01-19 - Phase 4 Implementation
+
+**Session Branch**: `claude/creative-mode-planning-VrGAe`
+
+**Work Done**:
+- Implemented Phase 4: Integration with spec_runner.py
+- Added content workflow types to `implementation_plan/enums.py`:
+  - `CONTENT_CREATE`, `CONTENT_EXPAND`, `CONTENT_ITERATE`, `CONTENT_DOCUMENT`
+- Added content detection to `spec/complexity.py`:
+  - `is_content_task()` method using ContentProjectDetector
+  - `get_content_project_type()` method for project type detection
+  - Fallback keyword matching if content module unavailable
+- Added content routing to `runners/spec_runner.py`:
+  - Detects content tasks before creating SpecOrchestrator
+  - Routes to `content_runner.cmd_plan()` for content tasks
+  - Preserves existing code pipeline for non-content tasks
+
+**Testing Results**:
+- All content task descriptions correctly detected (5/5)
+- All code task descriptions correctly NOT detected (5/5)
+- All imports verified working
+- Project type detection working correctly
+
+**Files Modified**:
+- `apps/backend/implementation_plan/enums.py` - Added 4 content workflow types
+- `apps/backend/spec/complexity.py` - Added content detection methods
+- `apps/backend/runners/spec_runner.py` - Added content routing logic
 
 ---
 

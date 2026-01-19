@@ -262,6 +262,46 @@ Examples:
                 project_dir = parent
                 break
 
+    # Check if this is a content task (Creative Mode)
+    # Content tasks are routed to content_runner instead of the code pipeline
+    if task_description and not args.interactive:
+        try:
+            from content import ContentProjectDetector
+
+            detector = ContentProjectDetector()
+            if detector.is_content_task(task_description):
+                project_type = detector.detect_combined(str(project_dir), task_description)
+                print()
+                print_status(
+                    f"Detected content task ({project_type.value}) - using Content Mode",
+                    "info",
+                )
+                print()
+
+                # Import and run content runner
+                from content_runner import cmd_plan
+
+                # Create args namespace for content_runner
+                import argparse as _argparse
+
+                content_args = _argparse.Namespace(
+                    project=str(project_dir),
+                    task=task_description,
+                    spec=None,
+                )
+
+                debug(
+                    "spec_runner",
+                    "Routing to Content Mode",
+                    project_type=project_type.value,
+                    task=task_description[:100],
+                )
+
+                return cmd_plan(content_args)
+        except ImportError:
+            # Content module not available, continue with code pipeline
+            debug("spec_runner", "Content module not available, using code pipeline")
+
     # Resolve model shorthand to full model ID
     resolved_model = resolve_model_id(args.model)
 

@@ -12,6 +12,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from content import ContentProjectType
 
 
 class Complexity(Enum):
@@ -149,6 +153,16 @@ class ComplexityAnalyzer:
         "cache",
         "proxy",
     ]
+
+    # Content Mode keywords - tasks matching these are routed to Content Mode
+    CONTENT_KEYWORDS = {
+        "card_game": ["card", "deck", "mana", "creature", "spell", "element", "faction", "rarity"],
+        "board_game": ["board", "tile", "piece", "turn", "component", "dice", "token"],
+        "ttrpg": ["monster", "dungeon", "campaign", "quest", "npc", "encounter", "dm", "gm", "bestiary"],
+        "worldbuilding": ["lore", "faction", "region", "history", "timeline", "world"],
+        "fiction": ["story", "chapter", "plot", "narrative", "scene", "novel"],
+        "documentation": ["document", "guide", "readme", "docs", "architecture"],
+    }
 
     def __init__(self, project_index: dict | None = None):
         self.project_index = project_index or {}
@@ -339,6 +353,46 @@ class ComplexityAnalyzer:
             reasons.append(f"{len(integrations)} integration(s)")
 
         return Complexity.STANDARD, 0.75, "; ".join(reasons)
+
+    def is_content_task(self, task_description: str) -> bool:
+        """Check if task is a content task rather than a code task.
+
+        Content tasks are routed to Content Mode for creative/documentation workflows.
+        Uses ContentProjectDetector for accurate detection.
+        """
+        try:
+            from content import ContentProjectDetector
+
+            detector = ContentProjectDetector()
+            return detector.is_content_task(task_description)
+        except ImportError:
+            # Fallback to simple keyword matching if content module not available
+            task_lower = task_description.lower()
+            for category, keywords in self.CONTENT_KEYWORDS.items():
+                matches = sum(1 for kw in keywords if kw in task_lower)
+                if matches >= 2:
+                    return True
+            return False
+
+    def get_content_project_type(
+        self, task_description: str, project_dir: Path | None = None
+    ) -> "ContentProjectType | None":
+        """Get detected content project type if this is a content task.
+
+        Returns None if not a content task or if content module unavailable.
+        """
+        try:
+            from content import ContentProjectDetector
+
+            detector = ContentProjectDetector()
+            if not detector.is_content_task(task_description):
+                return None
+
+            if project_dir:
+                return detector.detect_combined(str(project_dir), task_description)
+            return detector.detect_from_description(task_description)
+        except ImportError:
+            return None
 
 
 async def run_ai_complexity_assessment(

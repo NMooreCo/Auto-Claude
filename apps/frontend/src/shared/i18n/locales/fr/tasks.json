@@ -223,7 +223,11 @@
           "bug_fix": "Correction de bug",
           "refactoring": "Refactoring",
           "documentation": "Documentation",
-          "security": "Sécurité"
+          "security": "Sécurité",
+          "creative": "Créatif",
+          "game_design": "Conception de jeu",
+          "worldbuilding": "Création d'univers",
+          "content_docs": "Docs de contenu"
         },
         "priority": {
           "low": "Basse",
@@ -244,6 +248,26 @@
           "high": "Impact élevé",
           "critical": "Impact critique"
         }
+      }
+    },
+    "content": {
+      "title": "Détails du contenu",
+      "projectType": "Type de projet",
+      "selectProjectType": "Sélectionnez le type de projet...",
+      "targetAudience": "Public cible",
+      "targetAudiencePlaceholder": "ex: Joueurs familiers avec MTG",
+      "contentType": "Type de contenu",
+      "contentTypePlaceholder": "ex: Nouvelles cartes de créatures pour la faction eau",
+      "projectTypes": {
+        "card_game": "Jeu de cartes",
+        "board_game": "Jeu de plateau",
+        "ttrpg": "JDR sur table",
+        "worldbuilding": "Création d'univers",
+        "fiction": "Fiction/Écriture créative",
+        "business": "Document commercial",
+        "codebase_docs": "Documentation du code",
+        "api_docs": "Documentation API",
+        "general": "Contenu général"
       }
     }
   },

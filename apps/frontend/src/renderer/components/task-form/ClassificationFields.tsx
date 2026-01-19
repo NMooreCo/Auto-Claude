@@ -16,7 +16,13 @@ import {
 import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact } from '../../../shared/types';
 
 // Classification option keys (values are used for translation key lookup)
-const CATEGORY_OPTIONS: TaskCategory[] = ['feature', 'bug_fix', 'refactoring', 'documentation', 'security'];
+// Note: content categories (creative, game_design, worldbuilding, content_docs) trigger Content Mode UI
+const CATEGORY_OPTIONS: TaskCategory[] = [
+  // Code-related categories
+  'feature', 'bug_fix', 'refactoring', 'documentation', 'security',
+  // Content Mode categories (Creative Mode)
+  'creative', 'game_design', 'worldbuilding', 'content_docs'
+];
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 const COMPLEXITY_OPTIONS: TaskComplexity[] = ['trivial', 'small', 'medium', 'large', 'complex'];
 const IMPACT_OPTIONS: TaskImpact[] = ['low', 'medium', 'high', 'critical'];

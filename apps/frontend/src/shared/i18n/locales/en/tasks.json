@@ -223,7 +223,11 @@
           "bug_fix": "Bug Fix",
           "refactoring": "Refactoring",
           "documentation": "Docs",
-          "security": "Security"
+          "security": "Security",
+          "creative": "Creative",
+          "game_design": "Game Design",
+          "worldbuilding": "Worldbuilding",
+          "content_docs": "Content Docs"
         },
         "priority": {
           "low": "Low",
@@ -244,6 +248,26 @@
           "high": "High Impact",
           "critical": "Critical Impact"
         }
+      }
+    },
+    "content": {
+      "title": "Content Details",
+      "projectType": "Project Type",
+      "selectProjectType": "Select project type...",
+      "targetAudience": "Target Audience",
+      "targetAudiencePlaceholder": "e.g., Players familiar with MTG",
+      "contentType": "Content Type",
+      "contentTypePlaceholder": "e.g., New creature cards for water faction",
+      "projectTypes": {
+        "card_game": "Card Game",
+        "board_game": "Board Game",
+        "ttrpg": "Tabletop RPG",
+        "worldbuilding": "Worldbuilding",
+        "fiction": "Fiction/Creative Writing",
+        "business": "Business Document",
+        "codebase_docs": "Codebase Documentation",
+        "api_docs": "API Documentation",
+        "general": "General Content"
       }
     }
   },

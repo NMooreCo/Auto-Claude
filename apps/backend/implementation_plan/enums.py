@@ -13,6 +13,7 @@ from enum import Enum
 class WorkflowType(str, Enum):
     """Types of workflows with different phase structures."""
 
+    # Code workflows
     FEATURE = "feature"  # Multi-service feature (phases = services)
     REFACTOR = "refactor"  # Stage-based (add new, migrate, remove old)
     INVESTIGATION = "investigation"  # Bug hunting (investigate, hypothesize, fix)
@@ -20,6 +21,12 @@ class WorkflowType(str, Enum):
     SIMPLE = "simple"  # Single-service, minimal overhead
     DEVELOPMENT = "development"  # General development work
     ENHANCEMENT = "enhancement"  # Improving existing features
+
+    # Content workflows (Creative Mode)
+    CONTENT_CREATE = "content_create"  # Building new content from scratch
+    CONTENT_EXPAND = "content_expand"  # Adding to existing content
+    CONTENT_ITERATE = "content_iterate"  # Refining/improving existing content
+    CONTENT_DOCUMENT = "content_document"  # Generating documentation from code
 
 
 class PhaseType(str, Enum):

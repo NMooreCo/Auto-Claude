@@ -4,17 +4,22 @@
 
 Content Mode adds a parallel pipeline to Auto Claude for creative and documentation projects instead of just code. It handles concept → draft → review → refine cycles for non-code content.
 
-### Completed (Phases 1-3, 5, 8)
+### All Phases Complete ✅
 
 **PR #1 - Design Phase (Merged)**
 - 7 agent prompts in `apps/backend/prompts/`
 - Implementation plan in `guides/content-mode-implementation-plan.md`
 
-**PR #2 - Implementation Phase (Merged)**
+**PR #2 - Backend Implementation (Merged)**
 - Full backend module: `apps/backend/content/` (14 files)
 - CLI entry point: `apps/backend/content_runner.py`
 - Project scaffolding with templates
 - Test suite: `tests/test_content_mode.py` (55 tests, all passing)
+
+**PR #3 - Integration & Frontend (Merged)**
+- Phase 4: spec_runner.py integration - auto-routes content tasks to Content Mode
+- Phase 6: Frontend UI - content categories and ContentTaskFields component
+- Phase 7: i18n translations for English and French
 
 ---
 
@@ -157,156 +162,51 @@ scaffolder.scaffold("./new-game", ContentProjectType.CARD_GAME)
 
 ---
 
-## Remaining Work (Phases 4, 6, 7)
+## Implementation Details
 
-### Phase 4: Integration with spec_runner.py
+### Phase 4: spec_runner.py Integration ✅
 
-**Purpose**: Auto-route content tasks to Content Mode instead of code pipeline
+Auto-routes content tasks to Content Mode instead of code pipeline.
 
-**Files to Modify**:
+**Files Modified**:
+- `apps/backend/spec/complexity.py` - Added `is_content_task()` and `get_content_project_type()` methods
+- `apps/backend/runners/spec_runner.py` - Routes content tasks to `content_runner.cmd_plan()`
+- `apps/backend/implementation_plan/enums.py` - Added content workflow types
 
-1. `apps/backend/spec/complexity.py` - Add content detection:
-```python
-CONTENT_KEYWORDS = {
-    "card_game": ["card", "deck", "mana", "creature", "spell"],
-    "ttrpg": ["monster", "dungeon", "campaign", "spell", "dm"],
-    "documentation": ["document", "api", "endpoint", "guide"],
-}
-
-def is_content_task(self, description: str) -> bool:
-    """Check if task is content rather than code."""
-    # Use ContentProjectDetector
-    from content import ContentProjectDetector
-    detector = ContentProjectDetector()
-    return detector.is_content_task(description)
-```
-
-2. `apps/backend/spec_runner.py` - Route to content mode:
-```python
-from content import ContentProjectDetector
-from content_runner import run_planning as run_content_planning
-
-def create_spec(task: str, project_dir: str):
-    detector = ContentProjectDetector()
-
-    if detector.is_content_task(task):
-        print("Detected content task - using Content Mode")
-        return run_content_planning(project_dir, task)
-    else:
-        return run_code_planning(project_dir, task)
-```
-
-3. `apps/backend/implementation_plan/enums.py` - Add workflow types:
-```python
-class WorkflowType(str, Enum):
-    # Existing
-    FEATURE = "feature"
-    REFACTOR = "refactor"
-    # ...
-
-    # NEW: Content workflows
-    CONTENT_CREATE = "content_create"
-    CONTENT_EXPAND = "content_expand"
-    CONTENT_ITERATE = "content_iterate"
-    CONTENT_DOCUMENT = "content_document"
-```
+**How it works**: When a task is submitted, `ContentProjectDetector` checks if it's a content task. If so, it's routed to Content Mode instead of the code pipeline.
 
 ---
 
-### Phase 6: Frontend Integration
+### Phase 6: Frontend Integration ✅
 
-**Purpose**: Add "creative" category to task creation form
+Added content categories and ContentTaskFields component to the UI.
 
-**Files to Modify**:
+**Files Created**:
+- `apps/frontend/src/renderer/components/task-form/ContentTaskFields.tsx` - Project type, target audience, content type fields
 
-1. `apps/frontend/src/shared/types/index.ts`:
-```typescript
-export type TaskCategory =
-  | 'feature'
-  | 'bug_fix'
-  | 'refactoring'
-  | 'documentation'
-  | 'security'
-  // NEW
-  | 'creative'
-  | 'game_design'
-  | 'worldbuilding'
-  | 'content_docs';
+**Files Modified**:
+- `apps/frontend/src/shared/types/task.ts` - Added `TaskCategory` content types, `ContentProjectType`, `CONTENT_CATEGORIES`
+- `apps/frontend/src/renderer/components/task-form/ClassificationFields.tsx` - Added content categories
+- `apps/frontend/src/renderer/components/task-form/TaskFormFields.tsx` - Conditional ContentTaskFields rendering
+- `apps/frontend/src/renderer/components/TaskCreationWizard.tsx` - Content field state management
+- `apps/frontend/src/renderer/components/TaskEditDialog.tsx` - Content field support for editing
 
-export type ContentProjectType =
-  | 'card_game'
-  | 'board_game'
-  | 'ttrpg'
-  | 'worldbuilding'
-  | 'fiction'
-  | 'codebase_docs'
-  | 'general';
-```
-
-2. `apps/frontend/src/renderer/components/task-form/ClassificationFields.tsx`:
-```typescript
-const CATEGORY_OPTIONS: TaskCategory[] = [
-  'feature',
-  'bug_fix',
-  // ...existing...
-  'creative',      // NEW
-  'game_design',   // NEW
-  'worldbuilding', // NEW
-  'content_docs'   // NEW
-];
-```
-
-3. **Create** `apps/frontend/src/renderer/components/task-form/ContentTaskFields.tsx`:
-```typescript
-// New component showing project type dropdown, target audience, content type
-// when a content category is selected
-```
-
-4. `apps/frontend/src/renderer/components/TaskCreationWizard.tsx`:
-```typescript
-{isContentCategory(category) && (
-  <ContentTaskFields
-    projectType={contentProjectType}
-    onProjectTypeChange={setContentProjectType}
-    // ...
-  />
-)}
-```
+**UI Flow**: When user selects a content category (Creative, Game Design, Worldbuilding, Content Docs), the ContentTaskFields section appears with project type dropdown, target audience, and content type inputs.
 
 ---
 
-### Phase 7: i18n Translations
+### Phase 7: i18n Translations ✅
 
-**Files to Modify**:
+Added English and French translations for content mode UI.
 
-1. `apps/frontend/src/shared/i18n/locales/en/tasks.json`:
-```json
-{
-  "form": {
-    "content": {
-      "title": "Content Details",
-      "projectType": "Project Type",
-      "selectProjectType": "Select project type...",
-      "targetAudience": "Target Audience",
-      "targetAudiencePlaceholder": "e.g., Players familiar with MTG",
-      "contentType": "Content Type",
-      "contentTypePlaceholder": "e.g., New creature cards for water faction"
-    },
-    "classification": {
-      "values": {
-        "category": {
-          "creative": "Creative",
-          "game_design": "Game Design",
-          "worldbuilding": "Worldbuilding",
-          "content_docs": "Documentation"
-        }
-      }
-    }
-  }
-}
-```
+**Files Modified**:
+- `apps/frontend/src/shared/i18n/locales/en/tasks.json` - English translations
+- `apps/frontend/src/shared/i18n/locales/fr/tasks.json` - French translations
 
-2. `apps/frontend/src/shared/i18n/locales/fr/tasks.json` - French translations
+**Translation Keys Added**:
+- `form.classification.values.category.creative/game_design/worldbuilding/content_docs`
+- `form.content.title/projectType/targetAudience/contentType`
+- `form.content.projectTypes.*` - All 9 project types
 
 ---
 
@@ -335,8 +235,25 @@ This system also applies to board games, D&D/TTRPGs, and codebase documentation.
 
 ---
 
+## Phase Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Core Enums and Models | ✅ Complete |
+| 2 | Content Agents | ✅ Complete |
+| 3 | Content Runner CLI | ✅ Complete |
+| 4 | spec_runner.py Integration | ✅ Complete |
+| 5 | Project Templates | ✅ Complete |
+| 6 | Frontend Integration | ✅ Complete |
+| 7 | i18n Translations | ✅ Complete |
+| 8 | Testing | ✅ Complete |
+
+---
+
 ## Branch Information
 
-- Work completed on: `claude/implement-content-mode-9s601`
-- PRs merged to: `feature/creative-mode`
-- All 55 tests passing
+- Design work: `claude/add-creative-mode-9s601` (PR #1)
+- Backend implementation: `claude/implement-content-mode-9s601` (PR #2)
+- Integration & frontend: `claude/creative-mode-planning-VrGAe` (PR #3)
+- All merged to: `feature/creative-mode`
+- All 55 backend tests passing

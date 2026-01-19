@@ -34,7 +34,7 @@ import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { type FileReferenceData } from './task-form/useImageUpload';
 import { persistUpdateTask } from '../stores/task-store';
-import type { Task, ImageAttachment, TaskCategory, TaskPriority, TaskComplexity, TaskImpact, ModelType, ThinkingLevel } from '../../shared/types';
+import type { Task, ImageAttachment, TaskCategory, TaskPriority, TaskComplexity, TaskImpact, ModelType, ThinkingLevel, ContentProjectType } from '../../shared/types';
 import {
   DEFAULT_AGENT_PROFILES,
   DEFAULT_PHASE_MODELS,
@@ -112,6 +112,15 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     task.metadata?.requireReviewBeforeCoding ?? false
   );
 
+  // Content Mode fields (for creative/documentation tasks)
+  const [contentProjectType, setContentProjectType] = useState<ContentProjectType | ''>(
+    task.metadata?.contentProjectType || ''
+  );
+  const [contentTargetAudience, setContentTargetAudience] = useState(
+    task.metadata?.contentTargetAudience || ''
+  );
+  const [contentType, setContentType] = useState(task.metadata?.contentType || '');
+
   // Reset form when task changes or dialog opens
   useEffect(() => {
     if (open) {
@@ -152,6 +161,10 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
 
       setImages(task.metadata?.attachedImages || []);
       setRequireReviewBeforeCoding(task.metadata?.requireReviewBeforeCoding ?? false);
+      // Content Mode fields
+      setContentProjectType(task.metadata?.contentProjectType || '');
+      setContentTargetAudience(task.metadata?.contentTargetAudience || '');
+      setContentType(task.metadata?.contentType || '');
       setError(null);
 
       // Auto-expand classification if it has content
@@ -196,6 +209,9 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       model !== (task.metadata?.model || '') ||
       thinkingLevel !== (task.metadata?.thinkingLevel || '') ||
       requireReviewBeforeCoding !== (task.metadata?.requireReviewBeforeCoding ?? false) ||
+      contentProjectType !== (task.metadata?.contentProjectType || '') ||
+      contentTargetAudience !== (task.metadata?.contentTargetAudience || '') ||
+      contentType !== (task.metadata?.contentType || '') ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []) ||
       JSON.stringify(phaseModels) !== JSON.stringify(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS) ||
       JSON.stringify(phaseThinking) !== JSON.stringify(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
@@ -224,6 +240,10 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     // Always set attachedImages to persist removal when all images are deleted
     metadataUpdates.attachedImages = images.length > 0 ? images : [];
     metadataUpdates.requireReviewBeforeCoding = requireReviewBeforeCoding;
+    // Content Mode fields
+    if (contentProjectType) metadataUpdates.contentProjectType = contentProjectType;
+    if (contentTargetAudience) metadataUpdates.contentTargetAudience = contentTargetAudience;
+    if (contentType) metadataUpdates.contentType = contentType;
 
     const success = await persistUpdateTask(task.id, {
       title: trimmedTitle,
@@ -297,6 +317,12 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onImpactChange={setImpact}
         showClassification={showClassification}
         onShowClassificationChange={setShowClassification}
+        contentProjectType={contentProjectType}
+        contentTargetAudience={contentTargetAudience}
+        contentType={contentType}
+        onContentProjectTypeChange={setContentProjectType}
+        onContentTargetAudienceChange={setContentTargetAudience}
+        onContentTypeChange={setContentType}
         images={images}
         onImagesChange={setImages}
         requireReviewBeforeCoding={requireReviewBeforeCoding}

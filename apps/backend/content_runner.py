@@ -31,8 +31,10 @@ Usage:
 import argparse
 import sys
 import logging
+import json
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -76,6 +78,8 @@ def get_spec_dir(project_dir: Path, spec: str) -> Path:
 
     # Fall back to direct path
     return project_dir / spec
+
+
 
 
 def cmd_info(args) -> int:
@@ -128,9 +132,16 @@ def cmd_plan(args) -> int:
 
     print(f"Detected project type: {project_type.value}")
 
-    # Create spec directory
-    spec_dir = project_dir / ".auto-claude" / "specs" / "content-001"
-    spec_dir.mkdir(parents=True, exist_ok=True)
+    # Use provided spec directory or create one
+    if args.spec_dir:
+        spec_dir = Path(args.spec_dir).resolve()
+        if not spec_dir.exists():
+            print(f"Error: Spec directory does not exist: {spec_dir}")
+            return 1
+    else:
+        # Create spec directory
+        spec_dir = project_dir / ".auto-claude" / "specs" / "content-001"
+        spec_dir.mkdir(parents=True, exist_ok=True)
 
     # Save the brief
     brief_path = spec_dir / "spec.md"
@@ -154,9 +165,64 @@ def cmd_plan(args) -> int:
     total_subtasks = sum(len(p.subtasks) for p in plan.phases)
     print(f"  Total Subtasks: {total_subtasks}")
 
-    print(f"\nPlan saved to: {spec_dir / 'content_plan.json'}")
+    # Output to implementation_plan.json with unified format
+    # This allows the frontend to treat content plans like implementation plans
+    plan_data = {
+        "feature": plan.project_name,
+        "description": plan.workflow_rationale,
+        "workflow_type": "content",
+        # Content mode discriminator - allows frontend to detect content tasks
+        "planType": "content",
+        # Content-specific fields for UI display
+        "contentProjectType": plan.project_type.value,
+        "contentWorkflowType": plan.workflow_type.value,
+        # Convert content phases to implementation plan format
+        "phases": [
+            {
+                "phase": idx + 1,
+                "name": phase.name,
+                "type": phase.type.value,
+                "description": phase.description,
+                "subtasks": [
+                    {
+                        "id": subtask.id,
+                        "description": subtask.description,
+                        "status": subtask.status,
+                        # Content-specific subtask fields
+                        "artifact_type": subtask.artifact_type.value if subtask.artifact_type else None,
+                        "output": subtask.output,
+                    }
+                    for subtask in phase.subtasks
+                ],
+                "depends_on": [int(d.replace("phase_", "")) for d in phase.depends_on if d.startswith("phase_")] if phase.depends_on else [],
+            }
+            for idx, phase in enumerate(plan.phases)
+        ],
+        # Additional content plan data
+        "deliverables": plan.deliverables,
+        "quality_criteria": plan.quality_criteria,
+        "context": plan.context,
+        "summary": plan.summary,
+        # Standard implementation plan fields
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "spec_file": "spec.md",
+    }
+
+    # Add optional game/doc specific config if present
+    if plan.game_specific:
+        plan_data["game_specific"] = plan.game_specific
+    if plan.doc_specific:
+        plan_data["doc_specific"] = plan.doc_specific
+
+    # Write to implementation_plan.json (unified format)
+    impl_plan_path = spec_dir / "implementation_plan.json"
+    impl_plan_path.write_text(json.dumps(plan_data, indent=2))
+
+    print(f"\nPlan saved to: {impl_plan_path}")
     print(f"\nTo execute this plan, run:")
-    print(f"  python content_runner.py --project {args.project} --spec content-001 --execute")
+    print(f"  python content_runner.py --project {args.project} --spec {spec_dir.name} --execute")
 
     return 0
 
@@ -166,13 +232,13 @@ def cmd_execute(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec)
 
-    # Load the plan
-    plan_path = spec_dir / "content_plan.json"
+    # Load the plan from unified implementation_plan.json
+    plan_path = spec_dir / "implementation_plan.json"
     if not plan_path.exists():
-        print(f"Error: No content plan found at {plan_path}")
+        print(f"Error: No implementation plan found at {plan_path}")
         return 1
 
-    plan = ContentPlan.load(plan_path)
+    plan = ContentPlan.load_from_unified(plan_path)
 
     print(f"\nExecuting content plan: {plan.project_name}")
     print(f"Progress: {plan.get_progress()['percent_complete']}% complete")
@@ -198,8 +264,8 @@ def cmd_execute(args) -> int:
         print(f"  Completed: {result.get('subtask_id', 'N/A')}")
         print(f"  Progress: {progress.get('percent_complete', 0)}%")
 
-    # Save final plan state
-    plan.save(plan_path)
+    # Save final plan state to unified format
+    plan.save_to_unified(plan_path)
 
     print(f"\nExecution complete!")
     print(f"Final progress: {plan.get_progress()}")
@@ -212,13 +278,13 @@ def cmd_review(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec)
 
-    # Load the plan
-    plan_path = spec_dir / "content_plan.json"
+    # Load the plan from unified implementation_plan.json
+    plan_path = spec_dir / "implementation_plan.json"
     if not plan_path.exists():
-        print(f"Error: No content plan found at {plan_path}")
+        print(f"Error: No implementation plan found at {plan_path}")
         return 1
 
-    plan = ContentPlan.load(plan_path)
+    plan = ContentPlan.load_from_unified(plan_path)
 
     # Get deliverable paths
     content_paths = [d["path"] for d in plan.deliverables if "path" in d]
@@ -252,12 +318,12 @@ def cmd_consistency(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec) if args.spec else None
 
-    # Load plan if available
+    # Load plan if available from unified implementation_plan.json
     plan = None
     if spec_dir:
-        plan_path = spec_dir / "content_plan.json"
+        plan_path = spec_dir / "implementation_plan.json"
         if plan_path.exists():
-            plan = ContentPlan.load(plan_path)
+            plan = ContentPlan.load_from_unified(plan_path)
 
     print(f"\nRunning consistency checks...")
 
@@ -294,12 +360,12 @@ def cmd_balance(args) -> int:
         print(f"Supported types: {', '.join(t.value for t in BalanceAnalystAgent.SUPPORTED_TYPES)}")
         return 1
 
-    # Load plan if available
+    # Load plan if available from unified implementation_plan.json
     plan = None
     if spec_dir:
-        plan_path = spec_dir / "content_plan.json"
+        plan_path = spec_dir / "implementation_plan.json"
         if plan_path.exists():
-            plan = ContentPlan.load(plan_path)
+            plan = ContentPlan.load_from_unified(plan_path)
 
     print(f"\nRunning balance analysis...")
 
@@ -364,6 +430,12 @@ def main():
     parser.add_argument(
         "--spec", "-s",
         help="Spec ID or directory for existing plans",
+    )
+
+    parser.add_argument(
+        "--spec-dir",
+        type=Path,
+        help="Use existing spec directory (for frontend integration)",
     )
 
     # Commands

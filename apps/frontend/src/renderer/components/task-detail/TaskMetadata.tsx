@@ -13,7 +13,11 @@ import {
   GitPullRequest,
   ListChecks,
   Clock,
-  ExternalLink
+  ExternalLink,
+  PenTool,
+  Gamepad2,
+  Globe,
+  BookOpen
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -30,7 +34,10 @@ import {
   TASK_PRIORITY_LABELS,
   TASK_PRIORITY_COLORS,
   IDEATION_TYPE_LABELS,
-  JSON_ERROR_PREFIX
+  JSON_ERROR_PREFIX,
+  CONTENT_PROJECT_TYPE_LABELS,
+  CONTENT_PROJECT_TYPE_COLORS,
+  CONTENT_WORKFLOW_TYPE_LABELS
 } from '../../../shared/constants';
 import type { Task, TaskCategory } from '../../../shared/types';
 
@@ -44,7 +51,12 @@ const CategoryIcon: Record<TaskCategory, typeof Target> = {
   performance: Gauge,
   ui_ux: Palette,
   infrastructure: Wrench,
-  testing: FileCode
+  testing: FileCode,
+  // Content Mode categories
+  creative: PenTool,
+  game_design: Gamepad2,
+  worldbuilding: Globe,
+  content_docs: BookOpen
 };
 
 interface TaskMetadataProps {
@@ -64,14 +76,14 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
     return task.description;
   })();
 
-  const hasClassification = task.metadata && (
+  const hasClassification = (task.metadata && (
     task.metadata.category ||
     task.metadata.priority ||
     task.metadata.complexity ||
     task.metadata.impact ||
     task.metadata.securitySeverity ||
     task.metadata.sourceType
-  );
+  )) || (task.planType === 'content' && (task.contentProjectType || task.contentWorkflowType));
 
   return (
     <div className="space-y-5">
@@ -136,6 +148,22 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
                 {task.metadata.sourceType === 'ideation' && task.metadata.ideationType
                   ? IDEATION_TYPE_LABELS[task.metadata.ideationType] || task.metadata.ideationType
                   : task.metadata.sourceType}
+              </Badge>
+            )}
+            {/* Content Mode: Project Type */}
+            {task.planType === 'content' && task.contentProjectType && (
+              <Badge
+                variant="outline"
+                className={cn('text-xs', CONTENT_PROJECT_TYPE_COLORS[task.contentProjectType] || 'bg-muted text-muted-foreground')}
+              >
+                <PenTool className="h-3 w-3 mr-1" />
+                {CONTENT_PROJECT_TYPE_LABELS[task.contentProjectType] || task.contentProjectType}
+              </Badge>
+            )}
+            {/* Content Mode: Workflow Type */}
+            {task.planType === 'content' && task.contentWorkflowType && (
+              <Badge variant="secondary" className="text-xs">
+                {CONTENT_WORKFLOW_TYPE_LABELS[task.contentWorkflowType] || task.contentWorkflowType}
               </Badge>
             )}
           </div>

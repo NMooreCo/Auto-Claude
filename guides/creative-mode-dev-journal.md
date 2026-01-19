@@ -652,6 +652,86 @@ Final Content
 
 ---
 
+### 2026-01-19 - Backend Cleanup: Remove content_plan.json
+
+**Session Branch**: `feature/creative-mode`
+
+**Work Done**:
+- Removed all references to `content_plan.json` in backend
+- Added unified format methods to ContentPlan model:
+  - `save_to_unified()` - saves to implementation_plan.json format
+  - `load_from_unified()` - loads from implementation_plan.json format
+- Updated all content_runner.py commands to use model methods
+- Updated planner.py prompt and file search to use implementation_plan.json
+- Updated creator.py to save using unified format
+
+**Files Modified**:
+- `apps/backend/content/models.py` - Added `save_to_unified()` and `load_from_unified()` methods
+- `apps/backend/content_runner.py` - Updated commands to use model methods, removed standalone utility functions
+- `apps/backend/content/agents/planner.py` - Updated prompt and file search paths
+- `apps/backend/content/agents/creator.py` - Updated to use `save_to_unified()`
+
+**Result**: No `content_plan.json` files are created anymore. All content plans use unified `implementation_plan.json` format.
+
+---
+
+### 2026-01-19 - Unified Plan Format Implementation
+
+**Session Branch**: `feature/creative-mode`
+
+**Work Done**:
+- Implemented unified plan format for Content Mode frontend integration
+- Content plans now output to `implementation_plan.json` instead of separate `content_plan.json`
+- Frontend treats content plans the same as implementation plans with additional content fields
+
+**Problem Solved**:
+Content Mode backend created `content_plan.json`, but frontend only reads `implementation_plan.json`. Instead of duplicating file handling logic, we extended `implementation_plan.json` with optional content fields for a unified format.
+
+**Backend Changes** (`apps/backend/content_runner.py`):
+- Added `--spec-dir` argument to accept existing spec directories from frontend
+- Modified `cmd_plan` to output `implementation_plan.json` with unified format:
+  - `planType: 'content'` - discriminator for content tasks
+  - `contentProjectType` - type of content project (card_game, fiction, etc.)
+  - `contentWorkflowType` - workflow type (create, update, review, etc.)
+- Maintains backward compatibility by also saving `content_plan.json` for execute/review commands
+
+**Frontend Changes**:
+1. **Types** (`apps/frontend/src/shared/types/task.ts`):
+   - Added `PlanType` type (`'content' | 'implementation'`)
+   - Extended `ImplementationPlan` interface with content fields
+   - Extended `Task` interface with `planType`, `contentProjectType`, `contentWorkflowType`
+
+2. **Constants** (`apps/frontend/src/shared/constants/task.ts`):
+   - Added content category labels and colors
+   - Added `CONTENT_PROJECT_TYPE_LABELS` and `CONTENT_PROJECT_TYPE_COLORS`
+   - Added `CONTENT_WORKFLOW_TYPE_LABELS`
+
+3. **Project Store** (`apps/frontend/src/main/project-store.ts`):
+   - Extracts `planType`, `contentProjectType`, `contentWorkflowType` from plan when loading tasks
+   - Adds these fields to Task objects
+
+4. **Task Metadata Display** (`apps/frontend/src/renderer/components/task-detail/TaskMetadata.tsx`):
+   - Displays content project type and workflow type badges for content tasks
+   - Added content category icons (PenTool, Gamepad2, Globe, BookOpen)
+
+5. **Task Card** (`apps/frontend/src/renderer/components/TaskCard.tsx`):
+   - Added content mode category icons to CategoryIcon mapping
+
+**Backward Compatibility**:
+- Existing tasks without `planType` field default to `'implementation'`
+- No migration needed
+- No breaking changes to existing functionality
+
+**Files Modified**:
+- `apps/backend/content_runner.py` - Unified plan output
+- `apps/frontend/src/shared/types/task.ts` - PlanType and content fields
+- `apps/frontend/src/shared/constants/task.ts` - Content labels and colors
+- `apps/frontend/src/main/project-store.ts` - Content field extraction
+- `apps/frontend/src/renderer/components/task-detail/TaskMetadata.tsx` - Content metadata display
+- `apps/frontend/src/renderer/components/TaskCard.tsx` - Content category icons
+
+---
+
 ## References
 
 - [Content Mode Summary](./content-mode-summary.md) - Complete feature documentation

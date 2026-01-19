@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, Any
 from pathlib import Path
+from datetime import datetime
 import json
 
 from .enums import (
@@ -300,6 +301,101 @@ class ContentPlan:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
+
+    def save_to_unified(self, path: Path | str) -> None:
+        """Save the content plan to unified implementation_plan.json format."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Read existing data to preserve any fields we didn't modify
+        existing_data = {}
+        if path.exists():
+            with open(path) as f:
+                existing_data = json.load(f)
+
+        # Update with current plan state
+        plan_data = {
+            **existing_data,
+            "feature": self.project_name,
+            "description": self.workflow_rationale,
+            "workflow_type": "content",
+            "planType": "content",
+            "contentProjectType": self.project_type.value,
+            "contentWorkflowType": self.workflow_type.value,
+            "phases": [
+                {
+                    "phase": idx + 1,
+                    "name": phase.name,
+                    "type": phase.type.value,
+                    "description": phase.description,
+                    "subtasks": [
+                        {
+                            "id": subtask.id,
+                            "description": subtask.description,
+                            "status": subtask.status,
+                            "artifact_type": subtask.artifact_type.value if subtask.artifact_type else None,
+                            "output": subtask.output,
+                        }
+                        for subtask in phase.subtasks
+                    ],
+                    "depends_on": [int(d.replace("phase_", "")) for d in phase.depends_on if d.startswith("phase_")] if phase.depends_on else [],
+                }
+                for idx, phase in enumerate(self.phases)
+            ],
+            "deliverables": self.deliverables,
+            "quality_criteria": self.quality_criteria,
+            "context": self.context,
+            "summary": self.summary,
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        if self.game_specific:
+            plan_data["game_specific"] = self.game_specific
+        if self.doc_specific:
+            plan_data["doc_specific"] = self.doc_specific
+
+        with open(path, "w") as f:
+            json.dump(plan_data, f, indent=2)
+
+    @classmethod
+    def load_from_unified(cls, path: Path | str) -> "ContentPlan":
+        """Load ContentPlan from unified implementation_plan.json format."""
+        path = Path(path)
+        with open(path) as f:
+            data = json.load(f)
+
+        # Convert unified format back to ContentPlan structure
+        return cls(
+            project_name=data.get("feature", "Untitled"),
+            project_type=ContentProjectType(data.get("contentProjectType", "general")),
+            workflow_type=ContentWorkflowType(data.get("contentWorkflowType", "create")),
+            workflow_rationale=data.get("description", ""),
+            context=data.get("context", {}),
+            phases=[
+                ContentPhase(
+                    id=f"phase_{p['phase']}",
+                    name=p["name"],
+                    type=ContentPhaseType(p.get("type", "draft")),
+                    description=p.get("description", ""),
+                    subtasks=[
+                        ContentSubtask(
+                            id=s["id"],
+                            description=s["description"],
+                            artifact_type=ContentArtifactType(s.get("artifact_type", "document")),
+                            status=s.get("status", "pending"),
+                            output=s.get("output"),
+                        )
+                        for s in p.get("subtasks", [])
+                    ],
+                )
+                for p in data.get("phases", [])
+            ],
+            deliverables=data.get("deliverables", []),
+            quality_criteria=data.get("quality_criteria", {}),
+            game_specific=data.get("game_specific"),
+            doc_specific=data.get("doc_specific"),
+            summary=data.get("summary", {}),
+        )
 
     def get_current_phase(self) -> Optional[ContentPhase]:
         """Get the current phase (first incomplete phase with completed dependencies)."""

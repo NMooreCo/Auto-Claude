@@ -21,6 +21,13 @@ Content Mode adds a parallel pipeline to Auto Claude for creative and documentat
 - Phase 6: Frontend UI - content categories and ContentTaskFields component
 - Phase 7: i18n translations for English and French
 
+**Unified Plan Format (Latest)**
+- Content plans now output to `implementation_plan.json` with `planType: 'content'`
+- Frontend displays content metadata badges (project type, workflow type)
+- Backward compatible - existing tasks without `planType` default to `'implementation'`
+- `content_plan.json` is no longer created - all plans use unified format
+- ContentPlan model has `save_to_unified()` and `load_from_unified()` methods
+
 ---
 
 ## Supported Project Types
@@ -207,6 +214,41 @@ Added English and French translations for content mode UI.
 - `form.classification.values.category.creative/game_design/worldbuilding/content_docs`
 - `form.content.title/projectType/targetAudience/contentType`
 - `form.content.projectTypes.*` - All 9 project types
+
+---
+
+## Unified Plan Format
+
+Content Mode uses a unified plan format that extends `implementation_plan.json` with optional content fields. This allows the frontend to treat content plans the same as code implementation plans.
+
+### Plan Structure
+
+```json
+{
+  "feature": "Water Faction Expansion",
+  "description": "Creating new cards for the water faction",
+  "workflow_type": "content",
+  "planType": "content",                    // Discriminator: 'content' | 'implementation'
+  "contentProjectType": "card_game",        // Type: card_game, ttrpg, fiction, etc.
+  "contentWorkflowType": "create",          // Workflow: create, update, review, etc.
+  "phases": [...],
+  "status": "pending",
+  "created_at": "2026-01-19T..."
+}
+```
+
+### Frontend Display
+
+When `planType === 'content'`:
+- Task cards show content category icons (PenTool, Gamepad2, Globe, BookOpen)
+- Task detail view displays content project type and workflow type badges
+- Content metadata appears in the classification section
+
+### Backward Compatibility
+
+- Existing tasks without `planType` field default to `'implementation'`
+- No migration needed
+- Existing code tasks continue to work unchanged
 
 ---
 

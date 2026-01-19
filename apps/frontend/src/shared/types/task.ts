@@ -290,9 +290,16 @@ export interface Task {
   stagedAt?: string;  // ISO timestamp when changes were staged
   location?: 'main' | 'worktree';  // Where task was loaded from (main project or worktree)
   specsPath?: string;  // Full path to specs directory for this task
+  // Content Mode fields (from unified plan format)
+  planType?: PlanType;  // 'content' | 'implementation' - defaults to 'implementation'
+  contentProjectType?: ContentProjectType;  // Type of content project (for content tasks)
+  contentWorkflowType?: string;  // Content workflow type (for content tasks)
   createdAt: Date;
   updatedAt: Date;
 }
+
+// Plan type discriminator for unified plan format
+export type PlanType = 'content' | 'implementation';
 
 // Implementation Plan (from auto-claude)
 export interface ImplementationPlan {
@@ -310,6 +317,10 @@ export interface ImplementationPlan {
   planStatus?: string;
   recoveryNote?: string;
   description?: string;
+  // Content Mode fields (unified plan format)
+  planType?: PlanType;  // 'content' | 'implementation' - defaults to 'implementation'
+  contentProjectType?: ContentProjectType;  // Type of content project (for content plans)
+  contentWorkflowType?: string;  // Content workflow type (create, update, review, etc.)
 }
 
 export interface Phase {

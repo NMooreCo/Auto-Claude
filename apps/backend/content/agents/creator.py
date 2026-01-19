@@ -82,9 +82,9 @@ Mark the subtask as complete when finished.
         # Mark subtask as completed (agent should verify this)
         plan.mark_subtask_status(subtask.id, "completed")
 
-        # Save updated plan
+        # Save updated plan to unified implementation_plan.json format
         if self.spec_dir:
-            plan.save(self.spec_dir / "content_plan.json")
+            plan.save_to_unified(self.spec_dir / "implementation_plan.json")
 
         return {
             "status": "completed",

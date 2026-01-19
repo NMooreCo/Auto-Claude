@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, Clock, Zap, Target, Shield, Gauge, Palette, FileCode, Bug, Wrench, Loader2, AlertTriangle, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
+import { Play, Square, Clock, Zap, Target, Shield, Gauge, Palette, FileCode, Bug, Wrench, Loader2, AlertTriangle, RotateCcw, Archive, GitPullRequest, MoreVertical, PenTool, Gamepad2, Globe, BookOpen } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -44,7 +44,12 @@ const CategoryIcon: Record<TaskCategory, typeof Zap> = {
   performance: Gauge,
   ui_ux: Palette,
   infrastructure: Wrench,
-  testing: FileCode
+  testing: FileCode,
+  // Content Mode categories
+  creative: PenTool,
+  game_design: Gamepad2,
+  worldbuilding: Globe,
+  content_docs: BookOpen
 };
 
 // Phases where stuck detection should be skipped (terminal states + initial planning)

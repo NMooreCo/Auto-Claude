@@ -79,7 +79,7 @@ class ContentPlannerAgent(ContentAgent):
 ## INSTRUCTIONS
 
 Please analyze this project and create a comprehensive content plan.
-Save the plan to `content_plan.json` in the spec directory.
+Save the plan to `implementation_plan.json` in the spec directory.
 """
 
         # Run the agent session
@@ -107,10 +107,10 @@ Save the plan to `content_plan.json` in the spec directory.
         Returns:
             ContentPlan instance
         """
-        # Try to load from file first
+        # Try to load from file first (unified format)
         plan_paths = [
-            self.spec_dir / "content_plan.json" if self.spec_dir else None,
-            self.project_dir / "content_plan.json",
+            self.spec_dir / "implementation_plan.json" if self.spec_dir else None,
+            self.project_dir / "implementation_plan.json",
             Path(output_path) if output_path else None,
         ]
 
@@ -155,7 +155,7 @@ Save the plan to `content_plan.json` in the spec directory.
         # If we can't parse, raise an error
         raise ValueError(
             "Could not parse content plan from agent response. "
-            "The agent should have saved content_plan.json."
+            "The agent should have saved implementation_plan.json."
         )
 
     def create_plan_interactive(

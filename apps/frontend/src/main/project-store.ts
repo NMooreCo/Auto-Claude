@@ -2,7 +2,7 @@ import { app } from 'electron';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, Dirent } from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { Project, ProjectSettings, Task, TaskStatus, TaskMetadata, ImplementationPlan, ReviewReason, PlanSubtask } from '../shared/types';
+import type { Project, ProjectSettings, Task, TaskStatus, TaskMetadata, ImplementationPlan, ReviewReason, PlanSubtask, PlanType, ContentProjectType } from '../shared/types';
 import { DEFAULT_PROJECT_SETTINGS, AUTO_BUILD_PATHS, getSpecsDir, JSON_ERROR_PREFIX, JSON_ERROR_TITLE_SUFFIX } from '../shared/constants';
 import { getAutoBuildPath, isInitialized } from './project-initializer';
 import { getTaskWorktreeDir } from './worktree-paths';
@@ -486,6 +486,11 @@ export class ProjectStore {
         const stagedInMainProject = planWithStaged?.stagedInMainProject;
         const stagedAt = planWithStaged?.stagedAt;
 
+        // Extract Content Mode fields from unified plan format
+        const planType = (plan?.planType as PlanType) || 'implementation';
+        const contentProjectType = plan?.contentProjectType as ContentProjectType | undefined;
+        const contentWorkflowType = plan?.contentWorkflowType;
+
         // Determine title - check if feature looks like a spec ID (e.g., "054-something-something")
         // For JSON error tasks, use directory name with marker for i18n suffix
         let title = hasJsonError ? `${dir.name}${JSON_ERROR_TITLE_SUFFIX}` : (plan?.feature || plan?.title || dir.name);
@@ -521,6 +526,10 @@ export class ProjectStore {
           stagedAt,
           location, // Add location metadata (main vs worktree)
           specsPath: specPath, // Add full path to specs directory
+          // Content Mode fields from unified plan format
+          planType,
+          contentProjectType,
+          contentWorkflowType,
           createdAt: new Date(plan?.created_at || Date.now()),
           updatedAt: new Date(plan?.updated_at || Date.now())
         });

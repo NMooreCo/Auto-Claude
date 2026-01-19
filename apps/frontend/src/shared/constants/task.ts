@@ -112,7 +112,12 @@ export const TASK_CATEGORY_LABELS: Record<string, string> = {
   performance: 'Performance',
   ui_ux: 'UI/UX',
   infrastructure: 'Infrastructure',
-  testing: 'Testing'
+  testing: 'Testing',
+  // Content Mode categories
+  creative: 'Creative',
+  game_design: 'Game Design',
+  worldbuilding: 'Worldbuilding',
+  content_docs: 'Documentation'
 };
 
 export const TASK_CATEGORY_COLORS: Record<string, string> = {
@@ -124,7 +129,12 @@ export const TASK_CATEGORY_COLORS: Record<string, string> = {
   performance: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
   ui_ux: 'bg-info/10 text-info border-info/30',
   infrastructure: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
-  testing: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+  testing: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+  // Content Mode categories
+  creative: 'bg-pink-500/10 text-pink-400 border-pink-500/30',
+  game_design: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+  worldbuilding: 'bg-teal-500/10 text-teal-400 border-teal-500/30',
+  content_docs: 'bg-amber-500/10 text-amber-500 border-amber-500/30'
 };
 
 // ============================================
@@ -214,6 +224,43 @@ export const ALLOWED_IMAGE_TYPES_DISPLAY = 'PNG, JPEG, GIF, WebP, SVG';
 
 // Attachments directory name within spec folder
 export const ATTACHMENTS_DIR = 'attachments';
+
+// ============================================
+// Content Mode Project Types
+// ============================================
+
+export const CONTENT_PROJECT_TYPE_LABELS: Record<string, string> = {
+  card_game: 'Card Game',
+  board_game: 'Board Game',
+  ttrpg: 'TTRPG',
+  worldbuilding: 'Worldbuilding',
+  fiction: 'Fiction',
+  business: 'Business',
+  codebase_docs: 'Codebase Docs',
+  api_docs: 'API Docs',
+  general: 'General'
+};
+
+export const CONTENT_PROJECT_TYPE_COLORS: Record<string, string> = {
+  card_game: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+  board_game: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  ttrpg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+  worldbuilding: 'bg-teal-500/10 text-teal-400 border-teal-500/30',
+  fiction: 'bg-pink-500/10 text-pink-400 border-pink-500/30',
+  business: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+  codebase_docs: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
+  api_docs: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30',
+  general: 'bg-muted text-muted-foreground'
+};
+
+export const CONTENT_WORKFLOW_TYPE_LABELS: Record<string, string> = {
+  create: 'Create',
+  update: 'Update',
+  review: 'Review',
+  edit: 'Edit',
+  expand: 'Expand',
+  refine: 'Refine'
+};
 
 // ============================================
 // JSON Error Markers

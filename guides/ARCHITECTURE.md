@@ -202,4 +202,356 @@ This overview sets the foundation for understanding the detailed architecture se
 
 ---
 
+## High-Level Architecture
+
+This section provides a detailed view of Auto Claude's architectural components and their relationships.
+
+### System Component Diagram
+
+```mermaid
+graph TB
+    subgraph User["User Interface Layer"]
+        CLI["CLI<br/>run.py / spec_runner.py"]
+        Electron["Electron Desktop App<br/>apps/frontend/"]
+    end
+
+    subgraph Backend["Backend Core (apps/backend/)"]
+        subgraph Orchestration["Orchestration Layer"]
+            SpecOrch["SpecOrchestrator<br/>spec/pipeline/orchestrator.py"]
+            AgentLoop["Autonomous Agent Loop<br/>agents/coder.py"]
+            QALoop["QA Validation Loop<br/>qa/loop.py"]
+        end
+
+        subgraph Agents["Agent Layer"]
+            subgraph SpecAgents["Spec Creation Agents"]
+                Gatherer["Gatherer Agent"]
+                Researcher["Researcher Agent"]
+                Writer["Writer Agent"]
+                Critic["Critic Agent"]
+            end
+            subgraph ImplAgents["Implementation Agents"]
+                Planner["Planner Agent"]
+                Coder["Coder Agent"]
+            end
+            subgraph QAAgents["QA Agents"]
+                Reviewer["QA Reviewer"]
+                Fixer["QA Fixer"]
+            end
+        end
+
+        subgraph Core["Core Infrastructure"]
+            Client["Claude SDK Client<br/>core/client.py"]
+            Security["Security System<br/>core/security.py"]
+            Auth["Authentication<br/>core/auth.py"]
+            Workspace["Workspace Manager<br/>core/worktree.py"]
+        end
+
+        subgraph Memory["Memory & Context"]
+            Graphiti["Graphiti Memory<br/>integrations/graphiti/"]
+            SessionMem["Session Memory<br/>agents/memory_manager.py"]
+        end
+    end
+
+    subgraph External["External Services"]
+        ClaudeAPI["Claude API<br/>(via SDK)"]
+        Linear["Linear<br/>(Optional)"]
+        GitHub["GitHub<br/>(Optional)"]
+        Context7["Context7 MCP<br/>Documentation Lookup"]
+    end
+
+    subgraph FileSystem["File System Artifacts"]
+        SpecDir[".auto-claude/specs/XXX/"]
+        Worktree[".auto-claude/worktrees/tasks/XXX/"]
+    end
+
+    %% User Interface connections
+    CLI --> SpecOrch
+    CLI --> AgentLoop
+    Electron -->|"IPC / subprocess"| CLI
+
+    %% Orchestration to Agents
+    SpecOrch --> SpecAgents
+    AgentLoop --> Planner
+    AgentLoop --> Coder
+    QALoop --> Reviewer
+    QALoop --> Fixer
+
+    %% Agents to Core
+    SpecAgents --> Client
+    ImplAgents --> Client
+    QAAgents --> Client
+
+    %% Core to External
+    Client --> ClaudeAPI
+    Client --> Security
+    Client --> Auth
+    Client -->|"MCP"| Linear
+    Client -->|"MCP"| GitHub
+    Client -->|"MCP"| Context7
+    Client -->|"MCP"| Graphiti
+
+    %% Workspace and Memory
+    Workspace --> Worktree
+    SessionMem --> Graphiti
+    AgentLoop --> Workspace
+    AgentLoop --> SessionMem
+
+    %% File outputs
+    SpecOrch --> SpecDir
+    AgentLoop --> SpecDir
+    QALoop --> SpecDir
+
+    classDef userLayer fill:#e1f5fe,stroke:#01579b
+    classDef orchestration fill:#fff3e0,stroke:#e65100
+    classDef agents fill:#f3e5f5,stroke:#7b1fa2
+    classDef core fill:#e8f5e9,stroke:#2e7d32
+    classDef external fill:#fce4ec,stroke:#c2185b
+    classDef files fill:#f5f5f5,stroke:#616161
+
+    class CLI,Electron userLayer
+    class SpecOrch,AgentLoop,QALoop orchestration
+    class Gatherer,Researcher,Writer,Critic,Planner,Coder,Reviewer,Fixer agents
+    class Client,Security,Auth,Workspace,Graphiti,SessionMem core
+    class ClaudeAPI,Linear,GitHub,Context7 external
+    class SpecDir,Worktree files
+```
+
+### Component Responsibilities
+
+#### Entry Points
+
+| Entry Point | Location | Purpose |
+|-------------|----------|---------|
+| `run.py` | `apps/backend/run.py` | Bootstrap entry for CLI - validates Python version, configures encoding, delegates to `cli/main.py` |
+| `spec_runner.py` | `apps/backend/spec_runner.py` | Interactive spec creation - can be invoked directly or chains to `run.py` |
+| Electron Main | `apps/frontend/src/main/` | Desktop app entry - manages windows, spawns backend processes |
+
+#### Orchestration Layer
+
+The orchestration layer coordinates agent execution through well-defined pipelines:
+
+| Orchestrator | Location | Role |
+|--------------|----------|------|
+| **SpecOrchestrator** | `spec/pipeline/orchestrator.py` | Drives spec creation through complexity-dependent phases (3-8 phases) |
+| **Autonomous Agent Loop** | `agents/coder.py` | Executes Planner → Coder sessions iteratively until all subtasks complete |
+| **QA Validation Loop** | `qa/loop.py` | Runs QA Reviewer → QA Fixer cycle until approval or escalation |
+
+#### Agent Layer
+
+Agents are the AI-powered workers that perform actual tasks. Each agent type has specific capabilities and tool access:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        SPEC CREATION AGENTS                      │
+├────────────────┬───────────────────────────────────────────────-─┤
+│ Gatherer       │ Collects user requirements, asks clarifying     │
+│                │ questions, outputs requirements.json             │
+├────────────────┼────────────────────────────────────────────────-┤
+│ Researcher     │ Validates external integrations, checks API     │
+│                │ compatibility, outputs research.json             │
+├────────────────┼────────────────────────────────────────────────-┤
+│ Writer         │ Creates spec.md from requirements and context   │
+├────────────────┼────────────────────────────────────────────────-┤
+│ Critic         │ Self-critique using extended thinking,          │
+│                │ improves spec quality                            │
+└────────────────┴────────────────────────────────────────────────-┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                      IMPLEMENTATION AGENTS                       │
+├────────────────┬────────────────────────────────────────────────-┤
+│ Planner        │ Analyzes spec, creates implementation_plan.json │
+│                │ with subtasks, verification strategies          │
+├────────────────┼────────────────────────────────────────────────-┤
+│ Coder          │ Implements subtasks one-by-one, commits code,   │
+│                │ updates plan status                              │
+└────────────────┴────────────────────────────────────────────────-┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                          QA AGENTS                               │
+├────────────────┬────────────────────────────────────────────────-┤
+│ QA Reviewer    │ Validates implementation against acceptance     │
+│                │ criteria, runs tests, checks security           │
+├────────────────┼────────────────────────────────────────────────-┤
+│ QA Fixer       │ Fixes issues identified by reviewer, minimal    │
+│                │ changes approach                                 │
+└────────────────┴────────────────────────────────────────────────-┘
+```
+
+#### Core Infrastructure
+
+The core layer provides foundational services used by all agents:
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| **Claude SDK Client** | `core/client.py` | Factory for configured `ClaudeSDKClient` with security hooks, MCP servers, and tool permissions |
+| **Authentication** | `core/auth.py` | OAuth token resolution from env vars, keychains; SDK environment passthrough |
+| **Security System** | `core/security.py` + `security/` | Three-layer defense: sandbox, filesystem permissions, command allowlist |
+| **Project Analyzer** | `project/analyzer.py` | Detects tech stack, generates dynamic command allowlist |
+| **Workspace Manager** | `core/worktree.py` | Git worktree lifecycle: create, sync, merge, cleanup |
+
+#### Memory System
+
+Memory enables cross-session learning and context persistence:
+
+| Component | Location | Function |
+|-----------|----------|----------|
+| **Graphiti Memory** | `integrations/graphiti/` | Knowledge graph with semantic search, stores patterns/gotchas/discoveries |
+| **Session Memory** | `agents/memory_manager.py` | Orchestrates memory retrieval at session start, saves insights at session end |
+| **File-Based Fallback** | `session_memory.json` | Lightweight JSON fallback when Graphiti is unavailable |
+
+### Layered Architecture View
+
+Auto Claude follows a layered architecture where each layer has clear responsibilities and dependencies flow downward:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ PRESENTATION LAYER                                                   │
+│   CLI (argparse) │ Electron IPC │ Web API (future)                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ ORCHESTRATION LAYER                                                  │
+│   SpecOrchestrator │ AutonomousAgentLoop │ QAValidationLoop         │
+├─────────────────────────────────────────────────────────────────────┤
+│ AGENT LAYER                                                          │
+│   Spec Agents │ Implementation Agents │ QA Agents                   │
+│   (Each agent = system prompt + tool permissions + MCP access)      │
+├─────────────────────────────────────────────────────────────────────┤
+│ CORE SERVICES LAYER                                                  │
+│   ClaudeSDKClient │ SecurityProfile │ WorktreeManager │ Memory      │
+├─────────────────────────────────────────────────────────────────────┤
+│ INFRASTRUCTURE LAYER                                                 │
+│   Claude API │ Git │ File System │ External APIs (Linear, GitHub)  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Architectural Patterns
+
+#### 1. Fresh Context Window Pattern
+
+Each agent session starts with a fresh context window. State is loaded from files (spec, plan, previous outputs) rather than accumulated from conversation history:
+
+```python
+# agents/coder.py - Each session loads state fresh
+def run_autonomous_agent():
+    # Load plan from file (not from memory)
+    plan = load_implementation_plan(spec_dir)
+
+    # Find next subtask to work on
+    subtask = get_next_pending_subtask(plan)
+
+    # Generate prompt with all needed context
+    prompt = generate_subtask_prompt(subtask, spec_dir)
+
+    # Run session with fresh context
+    client.create_agent_session(starting_message=prompt)
+```
+
+**Why?** AI context windows have limits. Long conversations degrade performance. Fresh sessions maintain quality.
+
+#### 2. Subtask-Based Execution
+
+Large features are decomposed into atomic subtasks, each with:
+- Clear description
+- Files to modify
+- Verification strategy
+- Status tracking (pending → in_progress → completed)
+
+```json
+{
+  "id": "subtask-2-1",
+  "description": "Add authentication middleware",
+  "files": ["src/middleware/auth.ts"],
+  "verification": "npm test -- auth.test.ts",
+  "status": "pending"
+}
+```
+
+**Why?** Atomic units are easier for AI to implement correctly. Failed subtasks can be retried without losing progress.
+
+#### 3. Phase-Aware Tool Configuration
+
+Different agents get different tool access based on their role:
+
+| Agent Type | Tools | MCP Servers |
+|------------|-------|-------------|
+| Spec Gatherer | Read + Web | — |
+| Spec Researcher | Read + Web | context7 |
+| Planner | Read + Write + Web | context7, graphiti, auto-claude |
+| Coder | Read + Write + Web | context7, graphiti, auto-claude |
+| QA Reviewer | Read + Write + Web | context7, graphiti, auto-claude, browser |
+| QA Fixer | Read + Write + Web | context7, graphiti, auto-claude, browser |
+
+**Why?** Least privilege principle. Spec gathering agents don't need write access. Only QA agents need browser automation.
+
+#### 4. Isolation-First Workspace
+
+By default, all AI-generated code is written to an isolated git worktree:
+
+```
+project/
+├── .auto-claude/
+│   ├── specs/001-feature/       # Spec artifacts
+│   └── worktrees/tasks/001-feature/  # Isolated workspace (git worktree)
+├── src/                         # User's code (untouched)
+└── ...
+```
+
+**Why?** Users can review, test, and reject AI changes without affecting their working directory.
+
+#### 5. Recovery and Resilience
+
+The system includes multiple recovery mechanisms:
+
+| Mechanism | Purpose |
+|-----------|---------|
+| **RecoveryManager** | Tracks failed subtask attempts, provides hints, marks stuck tasks |
+| **Consecutive Error Escalation** | After 3 consecutive errors in QA loop, escalates to human |
+| **Recurring Issue Detection** | After 3 occurrences of same issue, escalates to human |
+| **Human Intervention File** | `PAUSE` file in spec dir halts automation for manual intervention |
+
+### Request Flow Example
+
+Here's how a typical feature request flows through the architecture:
+
+```
+1. User: "Add user authentication with JWT"
+                    │
+                    ▼
+2. CLI parses command, invokes SpecOrchestrator
+                    │
+                    ▼
+3. SpecOrchestrator runs complexity assessment
+   └── Determines: STANDARD complexity (6 phases)
+                    │
+                    ▼
+4. Spec Creation Pipeline:
+   ├── Discovery Phase → project_index.json
+   ├── Requirements Phase → requirements.json (via Gatherer Agent)
+   ├── Context Phase → context.json
+   ├── Spec Writing Phase → spec.md (via Writer Agent)
+   └── Planning Phase → implementation_plan.json (via Planner Agent)
+                    │
+                    ▼
+5. Autonomous Agent Loop starts:
+   └── For each subtask:
+       ├── Load subtask context
+       ├── Retrieve Graphiti memory
+       ├── Run Coder Agent session
+       ├── Post-session: commit, update plan, save memory
+       └── Continue to next subtask
+                    │
+                    ▼
+6. QA Validation Loop:
+   ├── Run QA Reviewer
+   ├── If rejected: Run QA Fixer → Loop back
+   └── If approved: Complete
+                    │
+                    ▼
+7. User Review:
+   ├── Test in isolated worktree
+   ├── Approve → Merge to main
+   └── Reject → Discard worktree
+```
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

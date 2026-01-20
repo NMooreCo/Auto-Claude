@@ -5041,4 +5041,223 @@ Phase N receives: All prior summaries + full Phase N-1 output
 
 This enables the 9-phase COMPLEX workflow to complete without running out of context.
 
-<!-- Subsequent diagrams (Implementation Pipeline, Agent-Tool-MCP) will be added in following subtasks -->
+### Implementation Pipeline Diagram
+
+This diagram provides a comprehensive view of the implementation pipeline, showing the complete journey from approved spec to merged code. It illustrates the autonomous agent loop, recovery mechanisms, and QA validation cycle in detail.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e3f2fd', 'primaryTextColor': '#0d47a1', 'primaryBorderColor': '#1565c0', 'lineColor': '#455a64', 'secondaryColor': '#fff8e1', 'tertiaryColor': '#fce4ec'}}}%%
+
+flowchart TB
+    %% ===== ENTRY POINT =====
+    SpecApproved([✅ Approved Spec<br/>from Spec Creation]) --> WorkspaceSetup
+
+    %% ===== WORKSPACE SETUP =====
+    subgraph WorkspacePhase["🔧 Phase 0: Workspace Setup"]
+        direction TB
+        WorkspaceSetup["WorktreeManager<br/>─────────────<br/>Create isolated worktree<br/>Branch: auto-claude/{spec}"]
+        WorkspaceSetup --> EnvSetup["Environment Replication<br/>─────────────<br/>Copy .env files<br/>Symlink node_modules<br/>Copy security profile"]
+        EnvSetup --> CopySpec["Copy Spec Files<br/>─────────────<br/>spec.md, requirements.json<br/>context.json to worktree"]
+    end
+
+    %% ===== PLANNING PHASE =====
+    CopySpec --> PlanCheck
+
+    subgraph PlannerPhase["📋 Phase 1: Planning"]
+        direction TB
+        PlanCheck{Plan<br/>exists?}
+        PlanCheck -->|No| PlannerAgent["🤖 Planner Agent<br/>─────────────<br/>planner.md prompt<br/>Model: claude-sonnet"]
+        PlannerAgent --> PlannerTools["Tools Available:<br/>Read, Write, Glob, Grep<br/>WebSearch, Context7 MCP<br/>auto-claude MCP"]
+        PlannerTools --> CreatePlan["Create Plan<br/>─────────────<br/>implementation_plan.json<br/>Phased subtasks<br/>Dependencies defined"]
+        PlanCheck -->|Yes| LoadPlan["Load Existing Plan<br/>─────────────<br/>Resume from last state"]
+    end
+
+    %% ===== CODER AUTONOMOUS LOOP =====
+    CreatePlan --> AutonomousLoop
+    LoadPlan --> AutonomousLoop
+
+    subgraph CoderPhase["🔨 Phase 2: Autonomous Coder Loop"]
+        direction TB
+
+        subgraph SessionCycle["Single Session Cycle"]
+            AutonomousLoop["Find Next Subtask<br/>─────────────<br/>Phase order priority<br/>Dependency check<br/>Skip stuck tasks"]
+
+            AutonomousLoop --> SubtaskFound{Subtask<br/>found?}
+            SubtaskFound -->|Yes| PrepareContext["Prepare Context<br/>─────────────<br/>Subtask prompt<br/>Recovery hints (if retry)<br/>Pattern files"]
+
+            PrepareContext --> GraphitiQuery["Query Graphiti Memory<br/>─────────────<br/>Past patterns<br/>Known gotchas<br/>Similar solutions"]
+
+            GraphitiQuery --> CoderAgent["🤖 Coder Agent Session<br/>─────────────<br/>coder.md prompt<br/>Fresh context window<br/>Model: claude-sonnet"]
+
+            CoderAgent --> CoderTools["Tools Available:<br/>Read, Write, Edit, Glob, Grep<br/>Bash (sandboxed), WebSearch<br/>Context7, auto-claude, graphiti MCP"]
+
+            CoderTools --> Implementation["Implementation<br/>─────────────<br/>Write code<br/>Run tests<br/>Self-verify"]
+        end
+
+        subgraph PostSession["Post-Session Processing"]
+            Implementation --> AutoCommit["Auto-Commit<br/>─────────────<br/>git add, commit<br/>Descriptive message"]
+
+            AutoCommit --> UpdatePlan["Update Plan Status<br/>─────────────<br/>Mark subtask completed<br/>or track failure"]
+
+            UpdatePlan --> SaveMemory["Save to Graphiti<br/>─────────────<br/>Discoveries<br/>Patterns<br/>Gotchas"]
+
+            SaveMemory --> SyncWorktree["Sync Worktree<br/>─────────────<br/>Push to isolated branch"]
+        end
+
+        subgraph RecoverySystem["Recovery Management"]
+            SyncWorktree --> RecoveryCheck{Failed/<br/>Stuck?}
+            RecoveryCheck -->|Yes| RecoveryManager["RecoveryManager<br/>─────────────<br/>Track attempt count<br/>Generate hints"]
+            RecoveryManager --> MaxRetries{Max<br/>retries?}
+            MaxRetries -->|No| PrepareContext
+            MaxRetries -->|Yes| MarkStuck["Mark Subtask Stuck<br/>─────────────<br/>Skip in future<br/>Alert in logs"]
+            MarkStuck --> AutonomousLoop
+            RecoveryCheck -->|No| ContinueDelay["Wait 3 seconds<br/>─────────────<br/>Check PAUSE file"]
+            ContinueDelay --> PauseCheck{PAUSE<br/>file?}
+            PauseCheck -->|Yes| HumanIntervene["Human Intervention<br/>─────────────<br/>Wait for file removal"]
+            HumanIntervene --> AutonomousLoop
+            PauseCheck -->|No| AutonomousLoop
+        end
+    end
+
+    SubtaskFound -->|No - All Complete| BuildComplete
+
+    %% ===== QA VALIDATION LOOP =====
+    subgraph QAPhase["✅ Phase 3: QA Validation Loop"]
+        direction TB
+
+        BuildComplete["Build Complete<br/>─────────────<br/>All subtasks done<br/>Ready for QA"]
+
+        BuildComplete --> CheckFeedback{Human<br/>feedback?}
+        CheckFeedback -->|Yes| ProcessFeedback["Process QA_FIX_REQUEST.md<br/>─────────────<br/>Load user feedback"]
+        CheckFeedback -->|No| StartQA
+
+        ProcessFeedback --> StartQA["Start QA Iteration<br/>─────────────<br/>Iteration counter<br/>Max: 50"]
+
+        StartQA --> QAReviewer["🤖 QA Reviewer Agent<br/>─────────────<br/>qa_reviewer.md prompt<br/>Model: claude-sonnet"]
+
+        QAReviewer --> QATools["QA Tools Available:<br/>Read, Write, Glob, Grep<br/>Bash, WebSearch<br/>electron MCP (E2E testing)<br/>puppeteer MCP (browser)"]
+
+        QATools --> ReviewActions["Review Actions<br/>─────────────<br/>Run test suite<br/>E2E testing (if Electron)<br/>Check acceptance criteria<br/>Security review"]
+
+        ReviewActions --> ReviewDecision{Approved?}
+
+        ReviewDecision -->|Yes| SignOff["QA Sign-Off<br/>─────────────<br/>Update qa_signoff<br/>Create qa_report.md"]
+
+        ReviewDecision -->|No| CreateFixRequest["Create Fix Request<br/>─────────────<br/>QA_FIX_REQUEST.md<br/>Specific issues"]
+
+        CreateFixRequest --> QAFixer["🤖 QA Fixer Agent<br/>─────────────<br/>qa_fixer.md prompt<br/>Minimal changes only"]
+
+        QAFixer --> FixerTools["Fixer Tools:<br/>Same as Coder<br/>+ browser MCPs"]
+
+        FixerTools --> ApplyFix["Apply Fixes<br/>─────────────<br/>Targeted changes<br/>Commit fix"]
+
+        ApplyFix --> IterationCheck{Max iterations?<br/>Recurring issues?}
+
+        IterationCheck -->|No| StartQA
+        IterationCheck -->|Yes - 50 iterations| EscalateHuman["Escalate to Human<br/>─────────────<br/>Create detailed report"]
+        IterationCheck -->|Yes - 3 recurring| EscalateHuman
+    end
+
+    %% ===== FINALIZATION =====
+    SignOff --> UserReview
+    EscalateHuman --> UserReview
+
+    subgraph FinalizationPhase["🏁 Phase 4: Finalization"]
+        direction TB
+
+        UserReview["User Review<br/>─────────────<br/>Test in worktree<br/>Review changes"]
+
+        UserReview --> FinalDecision{Decision?}
+
+        FinalDecision -->|"--merge"| MergeFlow["Merge to Base Branch<br/>─────────────<br/>git merge --no-ff<br/>Delete worktree<br/>Delete branch"]
+
+        FinalDecision -->|"--discard"| DiscardFlow["Discard Build<br/>─────────────<br/>Delete worktree<br/>Delete branch<br/>Requires confirmation"]
+
+        FinalDecision -->|"--review"| ReviewFlow["Keep for Later<br/>─────────────<br/>Worktree preserved<br/>Branch preserved"]
+    end
+
+    MergeFlow --> Success([🎉 Feature Complete<br/>Code merged to main])
+    DiscardFlow --> Discarded([❌ Build Discarded])
+    ReviewFlow --> Preserved([⏸️ Build Preserved<br/>for later review])
+
+    %% ===== FILE ARTIFACTS =====
+    subgraph FileArtifacts["📁 File Artifacts (Throughout Pipeline)"]
+        direction LR
+        PlanFile["implementation_plan.json<br/>─────────────<br/>Subtask status<br/>QA signoff<br/>Phase tracking"]
+        ProgressFile["build-progress.txt<br/>─────────────<br/>Human-readable<br/>Current status"]
+        QAReport["qa_report.md<br/>─────────────<br/>Review results<br/>Test outputs"]
+        FixRequest["QA_FIX_REQUEST.md<br/>─────────────<br/>Issues to fix<br/>Human feedback"]
+    end
+
+    %% ===== STYLING =====
+    classDef setup fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef planner fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef coder fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef qa fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    classDef finalize fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef recovery fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    classDef endpoint fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
+    classDef files fill:#eceff1,stroke:#455a64,stroke-width:2px
+
+    class WorkspaceSetup,EnvSetup,CopySpec setup
+    class PlannerAgent,PlannerTools,CreatePlan,LoadPlan planner
+    class AutonomousLoop,PrepareContext,GraphitiQuery,CoderAgent,CoderTools,Implementation,AutoCommit,UpdatePlan,SaveMemory,SyncWorktree coder
+    class BuildComplete,StartQA,QAReviewer,QATools,ReviewActions,SignOff,CreateFixRequest,QAFixer,FixerTools,ApplyFix qa
+    class UserReview,MergeFlow,DiscardFlow,ReviewFlow finalize
+    class PlanCheck,SubtaskFound,RecoveryCheck,MaxRetries,PauseCheck,CheckFeedback,ReviewDecision,IterationCheck,FinalDecision decision
+    class RecoveryManager,MarkStuck,HumanIntervene,EscalateHuman,ProcessFeedback recovery
+    class SpecApproved,Success,Discarded,Preserved endpoint
+    class PlanFile,ProgressFile,QAReport,FixRequest files
+```
+
+#### Implementation Pipeline Phase Summary
+
+| Phase | Agent(s) | Key Operations | Outputs |
+|-------|----------|----------------|---------|
+| **0: Workspace Setup** | — | Create worktree, replicate environment, copy spec | Isolated git branch |
+| **1: Planning** | Planner | Analyze spec, create subtasks, define dependencies | `implementation_plan.json` |
+| **2: Coder Loop** | Coder | Implement subtasks, auto-commit, track progress | Code changes, commits |
+| **3: QA Validation** | Reviewer + Fixer | Run tests, E2E validation, fix issues | `qa_report.md`, sign-off |
+| **4: Finalization** | — | User review, merge/discard decision | Merged code or preserved worktree |
+
+#### Key Pipeline Characteristics
+
+1. **Fresh Context Per Session**
+   - Each Coder session starts with a clean context window
+   - State is loaded from files (plan, spec, patterns)
+   - Prevents context degradation in long-running builds
+
+2. **Recovery-Resilient Design**
+   - Failed subtasks get retry hints from `RecoveryManager`
+   - Maximum retry count before marking stuck
+   - Stuck subtasks are skipped, not blocking
+   - Human can intervene via `PAUSE` file
+
+3. **QA Loop Bounds**
+   - Maximum 50 iterations to prevent infinite loops
+   - Recurring issues (3+ occurrences) trigger escalation
+   - Human feedback can be injected via `QA_FIX_REQUEST.md`
+
+4. **Workspace Isolation Guarantees**
+   - All changes happen in isolated worktree
+   - User's working directory untouched until explicit merge
+   - Easy to discard failed builds
+
+5. **Memory Persistence**
+   - Graphiti queries at session start for relevant patterns
+   - Discoveries and gotchas saved after each session
+   - Cross-session learning improves future builds
+
+#### Agent Tool Allocation in Pipeline
+
+| Agent | Base Tools | MCP Servers | Extended Thinking |
+|-------|------------|-------------|-------------------|
+| **Planner** | Read, Write, Glob, Grep, WebSearch | context7, auto-claude, graphiti | Medium (5000 tokens) |
+| **Coder** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti | High (10000 tokens) |
+| **QA Reviewer** | Read, Write, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | Medium (5000 tokens) |
+| **QA Fixer** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | High (10000 tokens) |
+
+*\*electron/puppeteer MCP only available when project capabilities include Electron or web apps*
+
+<!-- Agent-Tool-MCP Relationship Diagram will be added in the following subtask -->

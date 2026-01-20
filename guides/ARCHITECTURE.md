@@ -1811,4 +1811,536 @@ Custom MCP servers are validated before use:
 
 ---
 
+## Security Model
+
+Auto Claude implements a **defense-in-depth security model** with three independent layers of protection. Each layer operates independently, ensuring that a bypass of any single layer doesn't compromise the system. The security model is designed to allow AI agents to perform legitimate development tasks while preventing dangerous or unintended operations.
+
+### Security Philosophy
+
+The security model follows these key principles:
+
+1. **Fail-Safe Default** - Unknown commands are blocked; only explicitly allowed commands execute
+2. **Least Privilege** - Each agent type only gets the tools and permissions it needs
+3. **Dynamic Adaptation** - Security profiles are tailored to the detected project stack
+4. **Defense in Depth** - Three independent layers protect against different threat vectors
+5. **Transparent Validation** - Clear error messages explain why commands are blocked
+
+### Three-Layer Security Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           THREE-LAYER SECURITY MODEL                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  LAYER 1: OS SANDBOX                                                     │    │
+│  │  Claude Agent SDK sandbox mode                                           │    │
+│  │  • Bash command isolation via OS-level sandboxing                       │    │
+│  │  • Prevents filesystem escape outside sandbox                           │    │
+│  │  • Enabled: {"sandbox": {"enabled": true}}                              │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  LAYER 2: FILESYSTEM PERMISSIONS                                         │    │
+│  │  Restrict file operations to project directory                          │    │
+│  │  • Read/Write/Edit limited to project path and worktree                 │    │
+│  │  • Explicit permission grants via allow list                            │    │
+│  │  • MCP tool permissions based on required servers                       │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  LAYER 3: COMMAND ALLOWLIST + VALIDATORS                                 │    │
+│  │  Dynamic allowlist based on project analysis                            │    │
+│  │  • Base commands (always allowed): ls, git, cat, etc.                   │    │
+│  │  • Stack commands (detected tech): npm, pip, cargo, etc.                │    │
+│  │  • Script commands (project-specific): npm run build, make test, etc.   │    │
+│  │  • Specialized validators for dangerous commands                        │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Layer 1: OS Sandbox
+
+The first layer uses the Claude Agent SDK's built-in sandbox mode for OS-level command isolation.
+
+**Configuration:**
+```python
+# core/client.py - SDK options
+{
+    "sandbox": {
+        "enabled": True,
+        "autoAllowBashIfSandboxed": True
+    }
+}
+```
+
+**What it protects against:**
+- Processes escaping their assigned working directory
+- Access to system files outside the sandbox
+- Modification of OS-level configurations
+
+### Layer 2: Filesystem Permissions
+
+The second layer explicitly grants file operation permissions, restricting where agents can read and write.
+
+**Permission Configuration:**
+```python
+# core/client.py - Permission grants
+{
+    "permissions": {
+        "defaultMode": "acceptEdits",
+        "allow": [
+            # Project directory access
+            "Read(./**)",
+            "Write(./**)",
+            "Edit(./**)",
+            "Glob(./**)",
+            "Grep(./**)",
+
+            # Original project access (for worktree mode)
+            f"Read({project_path}/**)",
+            f"Write({project_path}/.auto-claude/**)",
+            f"Edit({project_path}/.auto-claude/**)",
+
+            # Bash permission (validated by Layer 3)
+            "Bash(*)",
+
+            # Web tools for research
+            "WebFetch(*)",
+            "WebSearch(*)",
+
+            # MCP tool permissions (based on required servers)
+            "mcp__context7__*",
+            "mcp__graphiti-memory__*",
+            # ... more based on agent type
+        ]
+    }
+}
+```
+
+**Key Permission Patterns:**
+
+| Pattern | Scope | Purpose |
+|---------|-------|---------|
+| `./**` | Relative to working directory | Standard file operations in project |
+| `{project_path}/**` | Original project (worktree mode) | Read access to original project files |
+| `{project_path}/.auto-claude/**` | Spec directory | Write spec artifacts from worktree |
+| `mcp__{server}__*` | MCP server tools | Access to specific MCP server capabilities |
+
+### Layer 3: Command Allowlist
+
+The third layer is the most sophisticated—a dynamic command allowlist that adapts to the project's technology stack.
+
+#### Security Hook Architecture
+
+The command allowlist is enforced through a `PreToolUse` hook that intercepts all Bash commands:
+
+```python
+# core/client.py - Hook registration
+{
+    "hooks": {
+        "PreToolUse": [
+            HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
+        ],
+    }
+}
+```
+
+**Hook Execution Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        BASH SECURITY HOOK FLOW                                    │
+│                        (security/hooks.py)                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Validate tool_input structure                                               │
+│     └── Must be dict with 'command' key                                         │
+│                                                                                  │
+│  2. Determine working directory                                                 │
+│     ├── Priority 1: AUTO_CLAUDE_PROJECT_DIR env var                            │
+│     ├── Priority 2: input_data cwd                                             │
+│     ├── Priority 3: context.cwd                                                │
+│     └── Priority 4: os.getcwd() (fallback)                                     │
+│                                                                                  │
+│  3. Get or create SecurityProfile for project                                   │
+│     └── Cached with file modification tracking                                  │
+│                                                                                  │
+│  4. Extract all commands from command string                                    │
+│     └── Handles pipes, &&, ||, semicolons, subshells                          │
+│                                                                                  │
+│  5. For each extracted command:                                                 │
+│     ├── Check against allowed commands (profile.get_all_allowed_commands())    │
+│     │   └── If not allowed → BLOCK with reason                                 │
+│     └── If allowed AND has validator → run specialized validator               │
+│         └── If validator fails → BLOCK with reason                             │
+│                                                                                  │
+│  6. Return {} to allow, or {"decision": "block", "reason": "..."} to block     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Security Profile Structure
+
+The `SecurityProfile` dataclass (`project/models.py`) organizes allowed commands into categories:
+
+```python
+@dataclass
+class SecurityProfile:
+    # Command categories (merged into final allowlist)
+    base_commands: set[str]     # Always-safe commands (ls, git, cat, etc.)
+    stack_commands: set[str]    # Detected tech stack (npm, pip, cargo, etc.)
+    script_commands: set[str]   # Project scripts (npm run build, make test, etc.)
+    custom_commands: set[str]   # User-defined allowlist (.auto-claude-allowlist)
+
+    # Detection metadata
+    detected_stack: TechnologyStack
+    custom_scripts: CustomScripts
+
+    # Cache control
+    project_dir: str
+    created_at: str
+    project_hash: str
+    inherited_from: str  # Parent project path if inherited (worktree mode)
+
+    def get_all_allowed_commands(self) -> set[str]:
+        """Merge all command sets into final allowlist."""
+        return (self.base_commands | self.stack_commands |
+                self.script_commands | self.custom_commands)
+```
+
+**Profile Storage:**
+- Location: `.auto-claude-security.json` in project root
+- Custom allowlist: `.auto-claude-allowlist` (one command per line)
+- Cache invalidation: Automatic when profile or allowlist file changes
+
+#### Command Categories
+
+##### Base Commands (Always Allowed)
+
+Core shell commands that are safe regardless of project type (`project/command_registry/base.py`):
+
+| Category | Examples |
+|----------|----------|
+| **File Operations** | `ls`, `cat`, `head`, `tail`, `cp`, `mv`, `mkdir`, `touch` |
+| **Text Processing** | `grep`, `sed`, `awk`, `sort`, `uniq`, `cut`, `tr` |
+| **Search** | `find`, `fd`, `rg`, `ag` |
+| **Archives** | `tar`, `zip`, `unzip`, `gzip` |
+| **Network (read-only)** | `curl`, `wget`, `ping`, `dig` |
+| **Git** | `git`, `gh` |
+| **Process Management** | `ps`, `pgrep`, `lsof`, `jobs`, `kill`* |
+| **Shell Utilities** | `echo`, `printf`, `env`, `which`, `date`, `time` |
+
+*Commands marked with asterisk require additional validation (see Specialized Validators).
+
+##### Stack Commands (Detected Technologies)
+
+Commands added based on detected project technologies:
+
+```python
+# project/command_registry/ - Technology-specific commands
+
+LANGUAGE_COMMANDS = {
+    "python": {"python", "python3", "pip", "pip3"},
+    "javascript": {"node", "nodejs"},
+    "typescript": {"tsc", "ts-node"},
+    "rust": {"rustc", "rustup"},
+    "go": {"go"},
+    # ... more languages
+}
+
+PACKAGE_MANAGER_COMMANDS = {
+    "npm": {"npm", "npx"},
+    "yarn": {"yarn"},
+    "pnpm": {"pnpm", "pnpx"},
+    "pip": {"pip", "pip3"},
+    "cargo": {"cargo"},
+    "uv": {"uv", "uvx"},
+    # ... more package managers
+}
+
+FRAMEWORK_COMMANDS = {
+    "react": {"react-scripts"},
+    "next": {"next"},
+    "django": {"django-admin", "manage.py"},
+    "fastapi": {"uvicorn"},
+    # ... more frameworks
+}
+
+DATABASE_COMMANDS = {
+    "postgresql": {"psql", "pg_dump", "pg_restore", "createdb", "dropdb"},
+    "mysql": {"mysql", "mysqldump", "mysqladmin"},
+    "redis": {"redis-cli", "redis-server"},
+    "mongodb": {"mongosh", "mongod", "mongodump"},
+    # ... more databases
+}
+```
+
+##### Script Commands (Project-Specific)
+
+Commands parsed from project configuration files:
+
+| Source File | Commands Extracted |
+|-------------|-------------------|
+| `package.json` | `npm run <script>`, `yarn <script>` for each script in `scripts` |
+| `Makefile` | `make <target>` for each target |
+| `pyproject.toml` | `poetry run <script>` for each script in `[tool.poetry.scripts]` |
+| `Cargo.toml` | `cargo <alias>` for each alias in `[alias]` |
+
+##### Custom Commands (User-Defined)
+
+Users can add custom commands via `.auto-claude-allowlist`:
+
+```bash
+# .auto-claude-allowlist
+# One command per line, comments start with #
+
+# Custom build tools
+bazel
+buck
+
+# Project-specific scripts
+./scripts/deploy.sh
+./scripts/migrate.sh
+
+# Company-specific tools
+internal-cli
+```
+
+### Specialized Validators
+
+Even when a command is in the allowlist, certain dangerous commands require additional validation through specialized validators (`security/validator_registry.py`):
+
+```python
+VALIDATORS: dict[str, ValidatorFunction] = {
+    # Process management
+    "pkill": validate_pkill_command,
+    "kill": validate_kill_command,
+    "killall": validate_killall_command,
+
+    # File system
+    "chmod": validate_chmod_command,
+    "rm": validate_rm_command,
+
+    # Git (secret scanning)
+    "git": validate_git_commit,
+
+    # Shell interpreters (validate -c commands)
+    "bash": validate_bash_command,
+    "sh": validate_sh_command,
+    "zsh": validate_zsh_command,
+
+    # Database commands
+    "dropdb": validate_dropdb_command,
+    "dropuser": validate_dropuser_command,
+    "psql": validate_psql_command,
+    "mysql": validate_mysql_command,
+    "redis-cli": validate_redis_cli_command,
+    "mongosh": validate_mongosh_command,
+}
+```
+
+#### Validator Details
+
+##### File System Validators
+
+**`chmod` Validator** - Only allows safe permission modes:
+
+```python
+# security/filesystem_validators.py
+SAFE_CHMOD_MODES = {
+    "+x", "a+x", "u+x", "g+x", "o+x", "ug+x",  # Executable permissions
+    "755", "644", "700", "600", "775", "664",   # Standard modes
+}
+# Rejects: 777, 000, setuid/setgid modes, etc.
+```
+
+**`rm` Validator** - Blocks dangerous deletion targets:
+
+```python
+DANGEROUS_RM_PATTERNS = [
+    r"^/$",           # Root
+    r"^\.\.$",        # Parent directory
+    r"^~$",           # Home directory
+    r"^\*$",          # Wildcard only
+    r"^/\*$",         # Root wildcard
+    r"^/home$",       # System directories
+    r"^/usr$",
+    r"^/etc$",
+    # ... more patterns
+]
+```
+
+##### Process Validators
+
+**`pkill`/`kill`/`killall` Validators** - Only allow terminating safe process targets:
+
+```python
+# Safe targets: node, npm, python, etc.
+# Blocked: system processes, login shells, etc.
+```
+
+##### Git Validator
+
+**`git commit` Validator** - Scans for secrets before allowing commits:
+
+```python
+# security/git_validators.py
+# Scans staged files for:
+# - API keys, tokens, passwords
+# - Private keys (RSA, SSH)
+# - AWS credentials
+# - Connection strings
+# Blocks commit if secrets detected
+```
+
+##### Shell Validators
+
+**`bash -c`/`sh -c` Validators** - Recursively validates commands inside `-c`:
+
+```python
+# If command is: bash -c "npm install && npm test"
+# Extracts and validates: "npm install && npm test"
+# All commands inside must also pass allowlist check
+```
+
+##### Database Validators
+
+**Database Command Validators** - Prevent destructive operations:
+
+| Command | Blocked Operations |
+|---------|-------------------|
+| `psql` | `DROP DATABASE`, `DROP TABLE`, `TRUNCATE` (without WHERE) |
+| `mysql` | `DROP DATABASE`, `DROP TABLE`, `TRUNCATE` |
+| `dropdb` | Production database names, system databases |
+| `redis-cli` | `FLUSHALL`, `FLUSHDB`, `CONFIG SET` |
+| `mongosh` | `db.dropDatabase()`, `db.collection.drop()` |
+
+### Project Analysis for Security Profiles
+
+The `ProjectAnalyzer` class (`project/analyzer.py`) automatically detects project technologies and generates tailored security profiles.
+
+#### Detection Process
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        PROJECT ANALYSIS FLOW                                      │
+│                        (project/analyzer.py)                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Scan Project Structure                                                       │
+│     ├── Check for config files (package.json, pyproject.toml, Cargo.toml, etc.)│
+│     ├── Detect directory patterns (src/, lib/, tests/, etc.)                   │
+│     └── Identify file extensions (.ts, .py, .rs, etc.)                         │
+│                                                                                  │
+│  2. Detect Technology Stack                                                      │
+│     ├── Languages: Python, JavaScript, TypeScript, Rust, Go, etc.              │
+│     ├── Package Managers: npm, yarn, pip, cargo, etc.                          │
+│     ├── Frameworks: React, Next.js, Django, FastAPI, etc.                      │
+│     ├── Databases: PostgreSQL, MySQL, Redis, MongoDB, etc.                     │
+│     ├── Infrastructure: Docker, Kubernetes, Terraform, etc.                    │
+│     └── Cloud Providers: AWS, GCP, Azure, etc.                                 │
+│                                                                                  │
+│  3. Parse Project Scripts                                                        │
+│     ├── package.json scripts → npm run <script>                                │
+│     ├── Makefile targets → make <target>                                       │
+│     ├── pyproject.toml scripts → poetry run <script>                           │
+│     └── Cargo.toml aliases → cargo <alias>                                     │
+│                                                                                  │
+│  4. Load Custom Allowlist                                                        │
+│     └── .auto-claude-allowlist → custom_commands                               │
+│                                                                                  │
+│  5. Generate Security Profile                                                    │
+│     ├── Merge: base + stack + script + custom commands                         │
+│     └── Save to .auto-claude-security.json                                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Profile Caching
+
+Security profiles are cached to avoid re-analysis on every command:
+
+```python
+# security/profile.py
+def get_security_profile(project_dir: Path, spec_dir: Path | None = None) -> SecurityProfile:
+    """
+    Get security profile with caching.
+
+    Cache invalidation triggers:
+    - Project directory changes
+    - .auto-claude-security.json created or modified
+    - .auto-claude-allowlist created, modified, or deleted
+    """
+```
+
+**Cache Files:**
+- `.auto-claude-security.json` - Full security profile (JSON)
+- `.auto-claude-allowlist` - Custom command allowlist (text, one per line)
+
+### MCP Server Security
+
+Custom MCP servers are validated before being allowed to run:
+
+```python
+# core/client.py - MCP server validation
+
+# Only these commands are allowed for command-type MCP servers
+SAFE_COMMANDS = {"npx", "npm", "node", "python", "python3", "uv", "uvx"}
+
+# These commands are explicitly blocked
+DANGEROUS_COMMANDS = {"bash", "sh", "cmd", "powershell", "pwsh", "zsh", "fish"}
+
+# These flags are blocked (allow arbitrary code execution)
+DANGEROUS_FLAGS = {"--eval", "-e", "-c", "-m", "-p", "--print", "--require", "-r"}
+```
+
+**Validation Rules for Custom MCP Servers:**
+
+| Rule | Description |
+|------|-------------|
+| Command allowlist | Only `npx`, `npm`, `node`, `python`, `uv` allowed |
+| No path separators | Commands must be bare names (no `/` or `\`) |
+| No dangerous flags | `--eval`, `-c`, `-e`, `-m`, etc. are blocked |
+| Type validation | `command` must be string, `args` must be string array |
+| HTTP URL validation | URL must be valid for HTTP-type servers |
+| Header validation | Headers must be string key-value pairs |
+
+### Security Configuration Files
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `.auto-claude-security.json` | Project root | Cached security profile with detected stack and allowed commands |
+| `.auto-claude-allowlist` | Project root | User-defined custom command allowlist (one command per line) |
+| `.auto-claude/.env` | Project `.auto-claude/` directory | MCP server toggles and custom server definitions |
+
+### Worktree Security Inheritance
+
+When working in a git worktree, security profiles are inherited from the original project:
+
+```python
+# Worktree security flow:
+# 1. Check if in worktree (has .auto-claude/worktrees/ in parent path)
+# 2. If yes, load profile from original project
+# 3. Mark profile as inherited (inherited_from field)
+# 4. Avoid re-analysis in worktree (same tech stack as original)
+```
+
+This ensures consistent security behavior whether agents work in the main project or an isolated worktree.
+
+### Security Best Practices
+
+When extending Auto Claude or adding custom integrations:
+
+1. **Never bypass the security hook** - All Bash commands must go through `bash_security_hook`
+2. **Add validators for dangerous commands** - If adding new commands to the allowlist that could be dangerous, add a corresponding validator
+3. **Use the custom allowlist** - For project-specific tools, add them to `.auto-claude-allowlist` rather than modifying source code
+4. **Review MCP servers** - Custom MCP servers should be audited before use
+5. **Test in isolation** - Use worktree mode to test changes in isolation before merging
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

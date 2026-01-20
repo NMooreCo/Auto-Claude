@@ -554,4 +554,260 @@ Here's how a typical feature request flows through the architecture:
 
 ---
 
+## Spec Creation Pipeline
+
+The Spec Creation Pipeline transforms a user's task description into a comprehensive specification document with an implementation plan. It dynamically adapts its workflow based on task complexity—simple tasks flow through a streamlined 4-phase pipeline while complex tasks go through up to 9 phases including research and self-critique.
+
+### Pipeline Overview
+
+The pipeline is orchestrated by the `SpecOrchestrator` class (`spec/pipeline/orchestrator.py`), which:
+
+1. **Assesses Complexity** - Uses AI or heuristics to determine task scope
+2. **Selects Phases** - Chooses which phases to run based on complexity
+3. **Executes Phases** - Runs phases sequentially with retry logic
+4. **Compacts Context** - Summarizes completed phases to manage context window
+5. **Validates Output** - Ensures all required artifacts are created
+
+### Complexity Tiers
+
+Auto Claude uses three complexity tiers to optimize the spec creation process:
+
+| Tier | Files | Services | Integrations | Example Tasks |
+|------|-------|----------|--------------|---------------|
+| **SIMPLE** | 1-2 | 1 | None | Fix typo, update button text, change colors |
+| **STANDARD** | 3-10 | 1-2 | 0-1 | Add a feature, create new component, refactor module |
+| **COMPLEX** | 10+ | 3+ | 2+ | Add authentication, integrate payment system, multi-service refactor |
+
+#### Complexity Assessment
+
+Complexity can be determined three ways:
+
+1. **AI Assessment** (default) - Runs `complexity_assessor.md` prompt to analyze requirements
+2. **Heuristic Analysis** - Keyword matching and pattern detection (fallback)
+3. **Manual Override** - User specifies `--complexity simple/standard/complex`
+
+```python
+# spec/complexity.py - ComplexityAnalyzer keywords
+SIMPLE_KEYWORDS = ["fix", "typo", "update", "change", "rename", "style", "color", "text"]
+COMPLEX_KEYWORDS = ["integrate", "api", "database", "migrate", "authentication", "oauth"]
+```
+
+### Phase Definitions
+
+Each complexity tier runs a different set of phases:
+
+```
+SIMPLE (4 phases):
+  discovery → historical_context → quick_spec → validation
+
+STANDARD (7 phases):
+  discovery → requirements → historical_context → [research] → context → spec_writing → planning → validation
+
+COMPLEX (9 phases):
+  discovery → requirements → historical_context → research → context → spec_writing → self_critique → planning → validation
+```
+
+#### Phase Details
+
+| Phase | Agent/Script | Output File | Purpose |
+|-------|--------------|-------------|---------|
+| **discovery** | `analyze_project()` | `project_index.json` | Scan project structure, detect tech stack, identify capabilities |
+| **requirements** | Interactive / `spec_gatherer.md` | `requirements.json` | Collect task description, acceptance criteria, constraints |
+| **complexity_assessment** | `complexity_assessor.md` | `complexity_assessment.json` | Analyze task scope, determine phases to run |
+| **historical_context** | Graphiti query | `graph_hints.json` | Retrieve relevant patterns and gotchas from past sessions |
+| **research** | `spec_researcher.md` | `research.json` | Validate external integrations, check API compatibility |
+| **context** | File analysis | `context.json` | Identify relevant files, existing patterns, dependencies |
+| **spec_writing** | `spec_writer.md` | `spec.md` | Create detailed feature specification document |
+| **self_critique** | `spec_critic.md` | Updates `spec.md` | Review and improve spec using extended thinking |
+| **quick_spec** | `spec_quick.md` | `spec.md` + `implementation_plan.json` | Combined spec+plan for simple tasks |
+| **planning** | `planner.md` | `implementation_plan.json` | Create subtask-based implementation plan |
+| **validation** | `SpecValidator` | — | Verify all required files exist with valid structure |
+
+### Spec Creation Flow Diagram
+
+```mermaid
+flowchart TB
+    Start([User Task]) --> Discovery
+
+    subgraph Phase1["Phase 1: Discovery"]
+        Discovery[Discovery Phase<br/>analyze_project.py]
+        Discovery --> ProjectIndex[project_index.json]
+    end
+
+    subgraph Phase2["Phase 2: Requirements"]
+        ProjectIndex --> Requirements[Requirements Phase<br/>Interactive or spec_gatherer.md]
+        Requirements --> ReqFile[requirements.json]
+    end
+
+    subgraph Phase3["Phase 3: Complexity Assessment"]
+        ReqFile --> Complexity{AI Complexity<br/>Assessment}
+        Complexity -->|SIMPLE| SimplePath
+        Complexity -->|STANDARD| StandardPath
+        Complexity -->|COMPLEX| ComplexPath
+    end
+
+    subgraph SimpleTier["SIMPLE Workflow (4 phases)"]
+        SimplePath[Historical Context] --> QuickSpec[Quick Spec Phase<br/>spec_quick.md]
+        QuickSpec --> SimpleValidate[Validation]
+    end
+
+    subgraph StandardTier["STANDARD Workflow (7 phases)"]
+        StandardPath[Historical Context] --> StdContext[Context Phase]
+        StdContext --> StdSpec[Spec Writing<br/>spec_writer.md]
+        StdSpec --> StdPlan[Planning Phase<br/>planner.md]
+        StdPlan --> StdValidate[Validation]
+    end
+
+    subgraph ComplexTier["COMPLEX Workflow (9 phases)"]
+        ComplexPath[Historical Context] --> Research[Research Phase<br/>spec_researcher.md]
+        Research --> CplxContext[Context Phase]
+        CplxContext --> CplxSpec[Spec Writing<br/>spec_writer.md]
+        CplxSpec --> Critique[Self-Critique<br/>spec_critic.md]
+        Critique --> CplxPlan[Planning Phase<br/>planner.md]
+        CplxPlan --> CplxValidate[Validation]
+    end
+
+    SimpleValidate --> Review
+    StdValidate --> Review
+    CplxValidate --> Review
+
+    Review[Human Review<br/>Checkpoint] --> Approved{Approved?}
+    Approved -->|Yes| Build([Start Build])
+    Approved -->|No| Edit[User Edits]
+    Edit --> Review
+
+    classDef phase fill:#e1f5fe,stroke:#01579b
+    classDef output fill:#f5f5f5,stroke:#616161
+    classDef decision fill:#fff3e0,stroke:#e65100
+    classDef endpoint fill:#e8f5e9,stroke:#2e7d32
+
+    class Discovery,Requirements,SimplePath,StandardPath,ComplexPath,QuickSpec,StdContext,StdSpec,StdPlan,CplxContext,CplxSpec,Critique,CplxPlan,Research phase
+    class ProjectIndex,ReqFile output
+    class Complexity,Approved decision
+    class Start,Build,Review endpoint
+```
+
+### Spec Creation Agents
+
+The pipeline uses specialized agents for different phases:
+
+#### Gatherer Agent (`spec_gatherer.md`)
+
+**Purpose:** Interactively collects requirements from the user.
+
+**Capabilities:**
+- Asks clarifying questions about scope
+- Identifies services and components involved
+- Extracts acceptance criteria
+- Detects constraints and blockers
+
+**Output:** `requirements.json` with structured task information
+
+#### Researcher Agent (`spec_researcher.md`)
+
+**Purpose:** Validates external integrations and researches best practices.
+
+**Capabilities:**
+- Verifies package names and versions
+- Checks API compatibility
+- Identifies known issues or gotchas
+- Uses Context7 MCP for documentation lookup
+
+**Output:** `research.json` with validated integration details
+
+#### Writer Agent (`spec_writer.md`)
+
+**Purpose:** Creates the comprehensive specification document.
+
+**Capabilities:**
+- Synthesizes requirements, research, and context
+- Defines technical approach
+- Documents API contracts
+- Lists all files to modify
+
+**Output:** `spec.md` with complete feature specification
+
+#### Critic Agent (`spec_critic.md`)
+
+**Purpose:** Self-reviews the spec using extended thinking (ultrathink mode).
+
+**Capabilities:**
+- Identifies gaps and inconsistencies
+- Suggests improvements to technical approach
+- Validates acceptance criteria completeness
+- Ensures implementation feasibility
+
+**Output:** Updated `spec.md` with improvements
+
+#### Quick Spec Agent (`spec_quick.md`)
+
+**Purpose:** Combined spec and plan creation for simple tasks.
+
+**Capabilities:**
+- Creates streamlined spec for small changes
+- Generates implementation plan simultaneously
+- Skips unnecessary phases for efficiency
+
+**Output:** `spec.md` + `implementation_plan.json`
+
+### Phase Execution Architecture
+
+The `PhaseExecutor` class (`spec/phases/executor.py`) combines multiple mixins to implement all phases:
+
+```
+PhaseExecutor
+├── DiscoveryPhaseMixin      # phase_discovery, phase_context
+├── RequirementsPhaseMixin   # phase_requirements, phase_historical_context, phase_research
+├── SpecPhaseMixin           # phase_spec_writing, phase_self_critique, phase_quick_spec
+└── PlanningPhaseMixin       # phase_planning, phase_validation
+```
+
+Each phase:
+1. **Checks for existing output** - Idempotency (skip if file exists)
+2. **Runs agent/script** - Up to 3 retry attempts
+3. **Validates output** - Ensures file was created with valid structure
+4. **Stores summary** - Compacts output for subsequent phases (context window management)
+
+### Phase Compaction
+
+To manage context window size, completed phases are summarized:
+
+```python
+# spec/compaction.py
+async def summarize_phase_output(phase_name: str, output: str, target_words: int = 500) -> str:
+    """Summarize phase output to fit in context window."""
+    # Uses a small, fast model to create concise summaries
+    # Summaries are passed to subsequent phases as prior_phase_summaries
+```
+
+This allows the full pipeline to run without exhausting the context window, even for complex tasks with lengthy outputs.
+
+### Output Files Summary
+
+After spec creation completes, the spec directory contains:
+
+```
+.auto-claude/specs/001-add-auth/
+├── requirements.json          # User requirements and acceptance criteria
+├── complexity_assessment.json # Complexity tier and reasoning
+├── graph_hints.json          # Historical context from Graphiti (if enabled)
+├── research.json             # External integration research (if needed)
+├── context.json              # Relevant files and patterns
+├── spec.md                   # Complete feature specification
+└── implementation_plan.json  # Subtask-based plan (ready for build)
+```
+
+### Human Review Checkpoint
+
+After all phases complete, the pipeline pauses for human review:
+
+1. **Display Summary** - Shows complexity, phases run, files created
+2. **Review Options** - User can approve, edit spec, or abort
+3. **Validation** - Checks that all required files exist
+4. **Approval Required** - Build cannot proceed without explicit approval
+
+This checkpoint ensures the AI's understanding matches user intent before committing significant resources to implementation.
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

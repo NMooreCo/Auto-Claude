@@ -810,4 +810,575 @@ This checkpoint ensures the AI's understanding matches user intent before commit
 
 ---
 
+## Implementation Pipeline
+
+Once a spec is created and approved, the Implementation Pipeline takes over. This pipeline transforms the specification into working code through a coordinated sequence of autonomous agent sessions—from planning the work to implementing subtasks to validating the result.
+
+### Pipeline Overview
+
+The Implementation Pipeline consists of three main phases:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        IMPLEMENTATION PIPELINE                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌────────────────┐     ┌─────────────────────┐     ┌──────────────────┐   │
+│  │   PLANNER      │     │      CODER          │     │   QA LOOP        │   │
+│  │   PHASE        │────►│      PHASE          │────►│   PHASE          │   │
+│  │                │     │  (multiple sessions) │     │  (review/fix)    │   │
+│  │  Create plan   │     │  Implement subtasks  │     │  Validate work   │   │
+│  └────────────────┘     └─────────────────────┘     └──────────────────┘   │
+│         │                        │                          │               │
+│         ▼                        ▼                          ▼               │
+│  implementation_plan.json   Code changes            qa_report.md           │
+│                             in worktree             QA signoff             │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Phase | Agent | Entry Point | Outputs |
+|-------|-------|-------------|---------|
+| **Planning** | Planner Agent | `agents/planner.py` | `implementation_plan.json` with subtasks |
+| **Implementation** | Coder Agent | `agents/coder.py` | Code changes, commits, plan status updates |
+| **Validation** | QA Reviewer + Fixer | `qa/loop.py` | `qa_report.md`, QA signoff in plan |
+
+### Implementation Flow Diagram
+
+```mermaid
+flowchart TB
+    Start([Approved Spec]) --> SetupWorkspace
+
+    subgraph Setup["Workspace Setup"]
+        SetupWorkspace[Setup Isolated Workspace<br/>WorktreeManager.create_worktree]
+        SetupWorkspace --> CopyEnv[Copy .env files<br/>Symlink node_modules]
+    end
+
+    subgraph PlannerPhase["Planner Phase"]
+        CopyEnv --> CheckPlan{Plan<br/>exists?}
+        CheckPlan -->|No| RunPlanner[Run Planner Agent<br/>agents/planner.py]
+        RunPlanner --> CreatePlan[Create implementation_plan.json<br/>with subtasks]
+        CheckPlan -->|Yes| LoadPlan[Load existing plan]
+    end
+
+    subgraph CoderPhase["Coder Phase (Autonomous Loop)"]
+        CreatePlan --> FindSubtask
+        LoadPlan --> FindSubtask
+
+        FindSubtask[Find next pending subtask<br/>respecting phase dependencies]
+        FindSubtask --> CheckSubtask{Subtask<br/>found?}
+
+        CheckSubtask -->|Yes| LoadContext[Load subtask context<br/>+ Graphiti memory]
+        LoadContext --> RunCoder[Run Coder Agent Session<br/>Fresh context window]
+        RunCoder --> PostSession[Post-session processing<br/>Commit, update plan, save memory]
+        PostSession --> RecoveryCheck{Stuck/<br/>Failed?}
+        RecoveryCheck -->|No| FindSubtask
+        RecoveryCheck -->|Yes| RecoveryManager[RecoveryManager provides hints<br/>or marks subtask stuck]
+        RecoveryManager --> FindSubtask
+
+        CheckSubtask -->|No - All Done| QAPhase
+    end
+
+    subgraph QAPhase["QA Validation Loop"]
+        QAStart[Start QA Loop<br/>qa/loop.py]
+        QAPhase[Build Complete] --> QAStart
+        QAStart --> RunReviewer[Run QA Reviewer<br/>qa/reviewer.py]
+        RunReviewer --> ReviewResult{Approved?}
+        ReviewResult -->|Yes| QAPass[QA Passed<br/>Update signoff status]
+        ReviewResult -->|No| RunFixer[Run QA Fixer<br/>qa/fixer.py]
+        RunFixer --> IterationCheck{Max iterations?<br/>Recurring issues?}
+        IterationCheck -->|No| RunReviewer
+        IterationCheck -->|Yes| Escalate[Escalate to Human<br/>Create QA_FIX_REQUEST.md]
+    end
+
+    QAPass --> UserReview[User Review<br/>Test in worktree]
+    Escalate --> UserReview
+    UserReview --> MergeDecision{User<br/>Decision}
+    MergeDecision -->|Merge| MergeCode[Merge to main branch]
+    MergeDecision -->|Discard| DiscardWorktree[Delete worktree + branch]
+    MergeDecision -->|Later| KeepWorktree[Keep worktree for later]
+
+    MergeCode --> Done([Complete])
+    DiscardWorktree --> Done
+    KeepWorktree --> Done
+
+    classDef phase fill:#e1f5fe,stroke:#01579b
+    classDef decision fill:#fff3e0,stroke:#e65100
+    classDef action fill:#f3e5f5,stroke:#7b1fa2
+    classDef endpoint fill:#e8f5e9,stroke:#2e7d32
+
+    class SetupWorkspace,CopyEnv,RunPlanner,CreatePlan,LoadPlan,FindSubtask,LoadContext,RunCoder,PostSession,RecoveryManager,QAStart,RunReviewer,RunFixer,Escalate,UserReview,MergeCode,DiscardWorktree,KeepWorktree action
+    class CheckPlan,CheckSubtask,RecoveryCheck,ReviewResult,IterationCheck,MergeDecision decision
+    class Start,QAPass,Done endpoint
+```
+
+### Planner Agent
+
+The Planner Agent analyzes the spec and creates a detailed implementation plan with phased subtasks.
+
+#### Purpose
+
+- Understand the full scope of the feature
+- Identify dependencies between tasks
+- Create atomic, verifiable subtasks
+- Establish verification strategies for each subtask
+
+#### Planner Flow
+
+```python
+# agents/planner.py - Simplified flow
+async def run_planner_session(spec_dir: Path, project_dir: Path):
+    # 1. Load planner prompt and spec context
+    prompt = load_prompt("planner.md")
+    spec = load_spec(spec_dir)
+
+    # 2. Create Claude SDK client with planner permissions
+    client = create_client(
+        agent_type="planner",
+        project_dir=project_dir,
+        spec_dir=spec_dir
+    )
+
+    # 3. Run single planning session
+    response = await client.create_agent_session(
+        starting_message=f"Create implementation plan for:\n{spec}"
+    )
+
+    # 4. Validate plan has pending subtasks
+    plan = load_implementation_plan(spec_dir)
+    if not has_pending_subtasks(plan):
+        raise PlanningError("Plan has no pending subtasks")
+```
+
+#### Plan Structure
+
+The planner creates `implementation_plan.json` with this structure:
+
+```json
+{
+  "feature": "User Authentication",
+  "description": "Add JWT-based authentication with login/logout",
+  "phases": [
+    {
+      "phase": 1,
+      "name": "Backend Authentication",
+      "description": "Implement auth middleware and endpoints",
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create JWT token utilities",
+          "files": ["src/utils/jwt.ts"],
+          "verification": "npm test -- jwt.test.ts",
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Implement auth middleware",
+          "files": ["src/middleware/auth.ts"],
+          "verification": "npm test -- auth.test.ts",
+          "status": "pending",
+          "depends_on": ["subtask-1-1"]
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Frontend Integration",
+      "description": "Add login UI and state management",
+      "subtasks": [...]
+    }
+  ],
+  "qa_signoff": null,
+  "status": "pending"
+}
+```
+
+#### Key Planning Features
+
+| Feature | Description |
+|---------|-------------|
+| **Phased Subtasks** | Subtasks are grouped into phases; all Phase 1 subtasks must complete before Phase 2 starts |
+| **Dependencies** | Subtasks can declare `depends_on` to enforce ordering within a phase |
+| **Verification Strategies** | Each subtask includes a command or description for verification |
+| **File Tracking** | Lists files to modify, helping prevent conflicts |
+| **Status Tracking** | `pending` → `in_progress` → `completed` (or `stuck`) |
+
+### Coder Agent
+
+The Coder Agent is the workhorse of the Implementation Pipeline. It runs in an autonomous loop, implementing subtasks one at a time until all work is complete.
+
+#### Autonomous Loop Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        AUTONOMOUS AGENT LOOP                                 │
+│                        (agents/coder.py)                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  FOR EACH SESSION:                                                    │   │
+│  │                                                                       │   │
+│  │  1. Load implementation_plan.json                                    │   │
+│  │  2. Find next pending subtask (respects phase order + dependencies)   │   │
+│  │  3. Generate subtask-specific prompt with:                           │   │
+│  │     - Subtask description                                            │   │
+│  │     - Files to modify                                                │   │
+│  │     - Verification strategy                                          │   │
+│  │     - Recovery hints (if retry)                                      │   │
+│  │  4. Retrieve Graphiti memory context                                 │   │
+│  │  5. Run Coder Agent session (fresh context window)                   │   │
+│  │  6. Post-session processing:                                         │   │
+│  │     - Auto-commit changes                                            │   │
+│  │     - Update subtask status in plan                                  │   │
+│  │     - Save discoveries/patterns to Graphiti                          │   │
+│  │     - Sync worktree if isolated mode                                 │   │
+│  │  7. Check for stuck/failed subtasks                                  │   │
+│  │  8. Wait AUTO_CONTINUE_DELAY_SECONDS (3s)                            │   │
+│  │  9. Loop to next subtask                                             │   │
+│  │                                                                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  EXIT CONDITIONS:                                                            │
+│  • All subtasks completed                                                   │
+│  • PAUSE file detected (human intervention requested)                       │
+│  • Max consecutive failures reached                                         │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Coder Features
+
+| Feature | Implementation | Purpose |
+|---------|----------------|---------|
+| **Fresh Context Window** | Each session loads state from files | Prevents context degradation over long conversations |
+| **Subtask Isolation** | One subtask per session | Focused work, clear verification |
+| **Recovery System** | `RecoveryManager` class | Tracks failures, provides hints, marks stuck |
+| **Memory Integration** | Graphiti queries at session start | Applies patterns and avoids past gotchas |
+| **Auto-Continue** | 3-second delay between sessions | Allows human intervention via PAUSE file |
+| **Worktree Sync** | Syncs changes to isolated worktree | Keeps work separate from user's directory |
+
+#### Subtask Selection Algorithm
+
+The coder selects the next subtask using this priority:
+
+```python
+# Simplified subtask selection logic
+def get_next_pending_subtask(plan):
+    for phase in plan["phases"]:
+        # Only work on current phase (earlier phases must be done)
+        if not all_subtasks_complete(phase):
+            for subtask in phase["subtasks"]:
+                if subtask["status"] == "pending":
+                    # Check dependencies within phase
+                    if dependencies_satisfied(subtask, phase):
+                        return subtask
+            # If pending subtasks exist but dependencies not met, wait
+            return None
+    return None  # All phases complete
+```
+
+#### Session Prompt Generation
+
+Each coder session receives a tailored prompt:
+
+```python
+# agents/coder.py - Prompt generation
+def generate_subtask_prompt(subtask, spec_dir, recovery_hints=None):
+    prompt = f"""
+## Current Subtask
+
+**ID:** {subtask['id']}
+**Description:** {subtask['description']}
+**Files to modify:** {', '.join(subtask.get('files', []))}
+**Verification:** {subtask.get('verification', 'Manual verification')}
+
+## Spec Context
+{load_file(spec_dir / 'spec.md')}
+
+## Implementation Plan
+{load_file(spec_dir / 'implementation_plan.json')}
+"""
+    if recovery_hints:
+        prompt += f"\n## Recovery Hints\n{recovery_hints}"
+
+    return prompt
+```
+
+#### Recovery System
+
+The `RecoveryManager` handles subtask failures:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                      RECOVERY SYSTEM                                  │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  Attempt 1: Normal execution                                         │
+│       ↓ FAIL                                                         │
+│  Attempt 2: Retry with error context                                 │
+│       ↓ FAIL                                                         │
+│  Attempt 3: Retry with expanded hints                                │
+│       ↓ FAIL                                                         │
+│  Mark subtask as "stuck" → Human intervention required               │
+│                                                                       │
+│  Recovery hints include:                                             │
+│  • Previous error messages                                           │
+│  • Files that were modified                                          │
+│  • Suggested alternative approaches                                  │
+│  • Relevant Graphiti gotchas                                         │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+#### Post-Session Processing
+
+After each coder session completes:
+
+```python
+# agents/session.py - Post-session processing
+async def post_session_processing(spec_dir, subtask_id, session_result):
+    # 1. Auto-commit any changes
+    if has_uncommitted_changes():
+        commit_changes(f"auto-claude: {subtask_id}")
+
+    # 2. Update subtask status in implementation_plan.json
+    update_subtask_status(spec_dir, subtask_id, "completed")
+
+    # 3. Save session insights to Graphiti memory
+    if graphiti_enabled():
+        save_session_memory(
+            patterns=extract_patterns(session_result),
+            discoveries=extract_discoveries(session_result),
+            gotchas=extract_gotchas(session_result)
+        )
+
+    # 4. Update build-progress.txt
+    update_build_progress(spec_dir, subtask_id)
+
+    # 5. Sync to worktree if in isolated mode
+    if workspace_mode == ISOLATED:
+        sync_worktree_changes()
+```
+
+### QA Validation Loop
+
+The QA Validation Loop ensures the implemented code meets acceptance criteria before declaring the build complete.
+
+#### Loop Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        QA VALIDATION LOOP                                    │
+│                        (qa/loop.py)                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Constants:                                                                 │
+│  • MAX_QA_ITERATIONS = 50                                                   │
+│  • RECURRING_ISSUE_THRESHOLD = 3                                            │
+│  • MAX_CONSECUTIVE_ERRORS = 3                                               │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  LOOP:                                                               │    │
+│  │                                                                      │    │
+│  │  1. Check for human feedback (QA_FIX_REQUEST.md from user)          │    │
+│  │  2. Run QA Reviewer session                                         │    │
+│  │     └── Validates against acceptance criteria                       │    │
+│  │     └── Runs tests, checks security, browser verification           │    │
+│  │     └── Sets qa_signoff in implementation_plan.json                 │    │
+│  │                                                                      │    │
+│  │  3. Check signoff status:                                           │    │
+│  │     └── APPROVED → Exit loop (success)                              │    │
+│  │     └── REJECTED → Continue to step 4                               │    │
+│  │                                                                      │    │
+│  │  4. Detect recurring issues                                         │    │
+│  │     └── If same issue appears 3+ times → Escalate to human         │    │
+│  │                                                                      │    │
+│  │  5. Run QA Fixer session                                            │    │
+│  │     └── Reads QA_FIX_REQUEST.md for specific issues                │    │
+│  │     └── Makes minimal fixes                                         │    │
+│  │     └── Commits changes                                             │    │
+│  │                                                                      │    │
+│  │  6. Increment iteration counter                                     │    │
+│  │     └── If max iterations reached → Escalate to human              │    │
+│  │                                                                      │    │
+│  │  7. Loop back to step 1                                             │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### QA Reviewer Agent
+
+The QA Reviewer validates the implementation against the spec's acceptance criteria.
+
+**Capabilities:**
+| Capability | Description |
+|------------|-------------|
+| **Test Execution** | Runs project test suites (npm test, pytest, etc.) |
+| **Browser Verification** | Uses Electron MCP or Puppeteer for UI testing |
+| **Security Review** | Checks for common vulnerabilities, secret exposure |
+| **Code Quality** | Validates patterns, error handling, edge cases |
+| **Memory Context** | Applies past QA patterns from Graphiti |
+
+**Validation Process:**
+```python
+# qa/reviewer.py - Simplified flow
+async def run_qa_reviewer(spec_dir, project_dir):
+    # 1. Load QA reviewer prompt with MCP tools
+    prompt = load_prompt("qa_reviewer.md")
+
+    # 2. Get browser tools based on project type
+    if is_electron_project(project_dir):
+        mcp_tools = ["electron"]  # Desktop app automation
+    elif is_web_project(project_dir):
+        mcp_tools = ["puppeteer"]  # Browser automation
+
+    # 3. Create client with QA permissions
+    client = create_client(
+        agent_type="qa_reviewer",
+        mcp_servers=["context7", "graphiti", "auto-claude"] + mcp_tools
+    )
+
+    # 4. Run validation session
+    await client.create_agent_session(
+        starting_message=f"Validate implementation:\n{spec}\n{plan}"
+    )
+
+    # 5. Check signoff status (set by agent via MCP tool)
+    plan = load_implementation_plan(spec_dir)
+    return plan.get("qa_signoff", {}).get("status")
+```
+
+**QA Signoff Structure:**
+```json
+{
+  "qa_signoff": {
+    "status": "rejected",  // or "approved"
+    "issues": [
+      {
+        "id": "qa-issue-1",
+        "severity": "high",
+        "description": "Login button doesn't handle network errors",
+        "location": "src/components/LoginForm.tsx:45",
+        "suggestion": "Add try/catch around fetch call"
+      }
+    ],
+    "tests_passed": ["auth.test.ts", "api.test.ts"],
+    "tests_failed": ["e2e/login.spec.ts"],
+    "reviewed_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+#### QA Fixer Agent
+
+The QA Fixer addresses issues identified by the reviewer with minimal, targeted changes.
+
+**Key Principles:**
+- **Minimal Changes** - Fix only what's broken, don't refactor
+- **Issue-Specific** - Addresses issues from QA_FIX_REQUEST.md
+- **Verification** - Runs relevant tests after each fix
+- **Commit Protocol** - Commits each fix separately for traceability
+
+**Fix Process:**
+```python
+# qa/fixer.py - Simplified flow
+async def run_qa_fixer(spec_dir, project_dir):
+    # 1. Load fix request
+    fix_request = load_file(spec_dir / "QA_FIX_REQUEST.md")
+
+    # 2. Load QA fixer prompt
+    prompt = load_prompt("qa_fixer.md")
+
+    # 3. Retrieve past fix patterns from memory
+    fix_patterns = get_graphiti_context(
+        query="QA fix patterns",
+        categories=["fix_pattern", "gotcha"]
+    )
+
+    # 4. Create client with fixer permissions
+    client = create_client(
+        agent_type="qa_fixer",
+        project_dir=project_dir,
+        spec_dir=spec_dir
+    )
+
+    # 5. Run fix session
+    await client.create_agent_session(
+        starting_message=f"""
+        Fix these QA issues:
+        {fix_request}
+
+        Relevant patterns from past fixes:
+        {fix_patterns}
+        """
+    )
+```
+
+#### Escalation to Human
+
+When the QA loop cannot resolve issues automatically, it escalates to human intervention:
+
+**Escalation Triggers:**
+| Trigger | Threshold | Action |
+|---------|-----------|--------|
+| Max iterations | 50 | Create QA_FIX_REQUEST.md with full history |
+| Recurring issue | Same issue 3+ times | Flag issue as needing human insight |
+| Consecutive errors | 3 errors in a row | Pause loop, request human review |
+
+**QA_FIX_REQUEST.md Format:**
+```markdown
+# QA Fix Request
+
+## Build Status
+- Iterations: 12
+- Last reviewed: 2024-01-15T10:30:00Z
+
+## Recurring Issues (Need Human Help)
+
+### Issue: Network error handling in LoginForm
+- First seen: Iteration 3
+- Occurrences: 4
+- Last suggestion: "Add try/catch around fetch call"
+- Why it persists: Error boundary catches exception before handler
+
+## Current Issues
+
+1. **[HIGH]** Login button network error handling
+   - File: src/components/LoginForm.tsx:45
+   - Suggestion: Review error boundary hierarchy
+
+2. **[MEDIUM]** Missing loading state on submit
+   - File: src/components/LoginForm.tsx:23
+   - Suggestion: Add isLoading state
+
+## Suggested Actions
+1. Review error handling architecture
+2. Consider global error boundary refactor
+```
+
+### Pipeline Status Tracking
+
+Throughout the pipeline, status is tracked in multiple places:
+
+| Location | Content | Updated By |
+|----------|---------|------------|
+| `implementation_plan.json` | Subtask statuses, QA signoff | Agents via MCP tools |
+| `build-progress.txt` | Human-readable session log | Post-session processing |
+| `qa_report.md` | Detailed QA findings | QA Reviewer |
+| `QA_FIX_REQUEST.md` | Issues for fixer/human | QA Loop |
+| Linear (optional) | Issue status sync | Linear integration |
+
+### Human Intervention Points
+
+The pipeline provides several points for human intervention:
+
+1. **PAUSE File** - Create `PAUSE` in spec directory to halt automation
+2. **Worktree Review** - Test changes in isolated worktree before merge
+3. **QA Feedback** - Edit `QA_FIX_REQUEST.md` to guide the fixer
+4. **Manual Merge** - User explicitly approves merge to main branch
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

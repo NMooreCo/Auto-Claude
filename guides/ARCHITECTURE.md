@@ -2034,8 +2034,10 @@ Core shell commands that are safe regardless of project type (`project/command_r
 | **Archives** | `tar`, `zip`, `unzip`, `gzip` |
 | **Network (read-only)** | `curl`, `wget`, `ping`, `dig` |
 | **Git** | `git`, `gh` |
-| **Process Management** | `ps`, `pgrep`, `lsof`, `jobs`, `kill`* |
+| **Process Management** | `ps`, `pgrep`, `lsof`, `jobs`, `kill`*, `pkill`*, `killall`* |
 | **Shell Utilities** | `echo`, `printf`, `env`, `which`, `date`, `time` |
+| **Shell Interpreters** | `sh`*, `bash`*, `zsh`* |
+| **File Operations (validated)** | `rm`*, `chmod`* |
 
 *Commands marked with asterisk require additional validation (see Specialized Validators).
 
@@ -2127,8 +2129,9 @@ VALIDATORS: dict[str, ValidatorFunction] = {
     # File system
     "chmod": validate_chmod_command,
     "rm": validate_rm_command,
+    "init.sh": validate_init_script,
 
-    # Git (secret scanning)
+    # Git (secret scanning + identity protection)
     "git": validate_git_commit,
 
     # Shell interpreters (validate -c commands)
@@ -2136,13 +2139,22 @@ VALIDATORS: dict[str, ValidatorFunction] = {
     "sh": validate_sh_command,
     "zsh": validate_zsh_command,
 
-    # Database commands
+    # Database - PostgreSQL
     "dropdb": validate_dropdb_command,
     "dropuser": validate_dropuser_command,
     "psql": validate_psql_command,
+
+    # Database - MySQL/MariaDB
     "mysql": validate_mysql_command,
+    "mariadb": validate_mysql_command,  # Same syntax as mysql
+    "mysqladmin": validate_mysqladmin_command,
+
+    # Database - Redis
     "redis-cli": validate_redis_cli_command,
+
+    # Database - MongoDB
     "mongosh": validate_mongosh_command,
+    "mongo": validate_mongosh_command,  # Legacy mongo shell
 }
 ```
 
@@ -2177,6 +2189,14 @@ DANGEROUS_RM_PATTERNS = [
 ]
 ```
 
+**`init.sh` Validator** - Restricts init script execution:
+
+```python
+# security/filesystem_validators.py
+# Only allows ./init.sh or paths ending in /init.sh
+# Blocks arbitrary script execution attempts
+```
+
 ##### Process Validators
 
 **`pkill`/`kill`/`killall` Validators** - Only allow terminating safe process targets:
@@ -2186,18 +2206,34 @@ DANGEROUS_RM_PATTERNS = [
 # Blocked: system processes, login shells, etc.
 ```
 
-##### Git Validator
+##### Git Validators
 
-**`git commit` Validator** - Scans for secrets before allowing commits:
+The git validator (`security/git_validators.py`) enforces multiple security rules:
+
+**1. Identity Protection** - Blocks modification of git identity:
 
 ```python
-# security/git_validators.py
+# Blocked config keys (cannot be set via git config or git -c)
+BLOCKED_GIT_CONFIG_KEYS = {
+    "user.name", "user.email",
+    "author.name", "author.email",
+    "committer.name", "committer.email",
+}
+# Blocks: git config user.name "Test User"
+# Blocks: git -c user.email="fake@email.com" commit -m "msg"
+# Why: Prevents fake identities, preserves commit attribution
+```
+
+**2. Secret Scanning** - Scans staged files before commits:
+
+```python
+# security/git_validators.py - validate_git_commit_secrets()
 # Scans staged files for:
 # - API keys, tokens, passwords
 # - Private keys (RSA, SSH)
 # - AWS credentials
 # - Connection strings
-# Blocks commit if secrets detected
+# Blocks commit if secrets detected with actionable fix instructions
 ```
 
 ##### Shell Validators
@@ -2216,11 +2252,13 @@ DANGEROUS_RM_PATTERNS = [
 
 | Command | Blocked Operations |
 |---------|-------------------|
-| `psql` | `DROP DATABASE`, `DROP TABLE`, `TRUNCATE` (without WHERE) |
-| `mysql` | `DROP DATABASE`, `DROP TABLE`, `TRUNCATE` |
-| `dropdb` | Production database names, system databases |
-| `redis-cli` | `FLUSHALL`, `FLUSHDB`, `CONFIG SET` |
-| `mongosh` | `db.dropDatabase()`, `db.collection.drop()` |
+| `psql` | `DROP DATABASE/SCHEMA/TABLE/INDEX/VIEW/FUNCTION/PROCEDURE/TRIGGER`, `TRUNCATE`, `DELETE FROM` (without WHERE), `DROP ALL`, `DESTROY` |
+| `mysql`/`mariadb` | Same as psql (via `-e` flag validation) |
+| `mysqladmin` | `drop`, `shutdown`, `kill` |
+| `dropdb` | Production database names (only test/dev databases allowed: test*, *_test, dev*, *_dev, local*, tmp*, temp*, scratch*, sandbox*, mock*) |
+| `dropuser` | Production usernames (only test/dev users allowed) |
+| `redis-cli` | `FLUSHALL`, `FLUSHDB`, `DEBUG`, `SHUTDOWN`, `SLAVEOF`, `REPLICAOF`, `CONFIG`, `BGSAVE`, `BGREWRITEAOF`, `CLUSTER` |
+| `mongosh`/`mongo` | `.dropDatabase()`, `.drop()`, `.deleteMany({})`, `.remove({})`, `db.dropAllUsers()`, `db.dropAllRoles()` |
 
 ### Project Analysis for Security Profiles
 
@@ -2294,11 +2332,22 @@ Custom MCP servers are validated before being allowed to run:
 # Only these commands are allowed for command-type MCP servers
 SAFE_COMMANDS = {"npx", "npm", "node", "python", "python3", "uv", "uvx"}
 
-# These commands are explicitly blocked
-DANGEROUS_COMMANDS = {"bash", "sh", "cmd", "powershell", "pwsh", "zsh", "fish"}
+# These commands are explicitly blocked (including full paths)
+DANGEROUS_COMMANDS = {
+    "bash", "sh", "cmd", "powershell", "pwsh", "zsh", "fish",
+    "/bin/bash", "/bin/sh", "/bin/zsh", "/usr/bin/bash", "/usr/bin/sh"
+}
 
 # These flags are blocked (allow arbitrary code execution)
-DANGEROUS_FLAGS = {"--eval", "-e", "-c", "-m", "-p", "--print", "--require", "-r"}
+DANGEROUS_FLAGS = {
+    "--eval", "-e", "-c", "--exec",
+    "-m",  # Python module execution
+    "-p",  # Python eval+print
+    "--print",  # Node.js print
+    "--input-type=module",  # Node.js ES module mode
+    "--experimental-loader",  # Node.js custom loaders
+    "--require", "-r"  # Node.js require injection
+}
 ```
 
 **Validation Rules for Custom MCP Servers:**

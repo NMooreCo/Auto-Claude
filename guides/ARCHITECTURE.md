@@ -5260,4 +5260,276 @@ flowchart TB
 
 *\*electron/puppeteer MCP only available when project capabilities include Electron or web apps*
 
-<!-- Agent-Tool-MCP Relationship Diagram will be added in the following subtask -->
+### Agent-Tool-MCP Relationship Diagram
+
+This diagram visualizes how different agent types connect to tools and MCP servers through the centralized `AGENT_CONFIGS` configuration.
+
+```mermaid
+flowchart TB
+    subgraph Config["⚙️ Configuration Layer"]
+        AC[("AGENT_CONFIGS<br/>(Single Source of Truth)")]
+    end
+
+    subgraph Agents["🤖 Agent Types"]
+        direction TB
+        subgraph SpecAgents["Spec Creation Agents"]
+            SG[spec_gatherer]
+            SR[spec_researcher]
+            SW[spec_writer]
+            SC[spec_critic]
+            SD[spec_discovery]
+            SCX[spec_context]
+        end
+
+        subgraph BuildAgents["Build Agents"]
+            PL[planner]
+            CD[coder]
+        end
+
+        subgraph QAAgents["QA Agents"]
+            QR[qa_reviewer]
+            QF[qa_fixer]
+        end
+
+        subgraph UtilityAgents["Utility Agents"]
+            IN[insights]
+            MR[merge_resolver]
+            CM[commit_message]
+        end
+
+        subgraph PRAgents["PR/GitHub Agents"]
+            PRR[pr_reviewer]
+            PRO[pr_orchestrator]
+            PRF[pr_followup]
+        end
+    end
+
+    subgraph BaseTools["🔧 Base Tools (Claude Code Built-in)"]
+        direction LR
+        subgraph ReadTools["Read Tools"]
+            RT_R[Read]
+            RT_G[Glob]
+            RT_GR[Grep]
+        end
+        subgraph WriteTools["Write Tools"]
+            WT_W[Write]
+            WT_E[Edit]
+            WT_B[Bash]
+        end
+        subgraph WebTools["Web Tools"]
+            WB_F[WebFetch]
+            WB_S[WebSearch]
+        end
+    end
+
+    subgraph MCPServers["🔌 MCP Servers"]
+        direction LR
+        C7["context7<br/>(Doc Lookup)"]
+        GR["graphiti<br/>(Memory)"]
+        LN["linear<br/>(Project Mgmt)"]
+        ACT["auto-claude<br/>(Build Mgmt)"]
+        EL["electron<br/>(Desktop Test)"]
+        PP["puppeteer<br/>(Web Test)"]
+    end
+
+    subgraph AutoClaudeTools["🛠️ Auto-Claude Tools"]
+        direction LR
+        USS[update_subtask_status]
+        GBP[get_build_progress]
+        RD[record_discovery]
+        RG[record_gotcha]
+        GSC[get_session_context]
+        UQS[update_qa_status]
+    end
+
+    %% Configuration lookups
+    AC -.->|"tools"| BaseTools
+    AC -.->|"mcp_servers"| MCPServers
+    AC -.->|"auto_claude_tools"| AutoClaudeTools
+
+    %% Spec agents connections
+    SG --> RT_R & RT_G & WB_F
+    SR --> RT_R & RT_G & WB_F & WB_S
+    SR --> C7
+    SW --> RT_R & RT_G & WT_W & WT_E
+    SC --> RT_R & RT_G
+    SD --> RT_R & RT_G & RT_GR
+    SCX --> RT_R & RT_G & RT_GR
+
+    %% Build agents connections
+    PL --> RT_R & RT_G & RT_GR & WT_W & WT_E & WB_F & WB_S
+    PL --> C7 & GR & ACT
+    PL --> USS & GBP & RD & GSC
+
+    CD --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
+    CD --> C7 & GR & ACT
+    CD --> USS & GBP & RD & RG & GSC
+
+    %% QA agents connections
+    QR --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
+    QR --> C7 & GR & ACT
+    QR --> USS & GBP & GSC & UQS
+    QR -.->|"if Electron"| EL
+    QR -.->|"if Web"| PP
+
+    QF --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
+    QF --> C7 & GR & ACT
+    QF --> USS & GBP & RD & RG & GSC & UQS
+    QF -.->|"if Electron"| EL
+    QF -.->|"if Web"| PP
+
+    %% Utility agents connections
+    IN --> RT_R & RT_G & RT_GR & WB_F & WB_S
+    MR --> RT_R & RT_G & RT_GR & WT_W & WT_E
+    CM --> RT_R & RT_G
+
+    %% PR agents connections
+    PRR --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
+    PRR --> C7 & GR
+    PRO --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B
+    PRO --> C7 & GR
+    PRF --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B
+    PRF --> C7 & GR
+
+    %% Linear (optional)
+    PL & CD & QR & QF -.->|"if enabled"| LN
+
+    %% Styling
+    classDef configNode fill:#f9f,stroke:#333,stroke-width:2px
+    classDef specAgent fill:#e1f5fe,stroke:#01579b
+    classDef buildAgent fill:#e8f5e9,stroke:#1b5e20
+    classDef qaAgent fill:#fff3e0,stroke:#e65100
+    classDef utilAgent fill:#f3e5f5,stroke:#4a148c
+    classDef prAgent fill:#fce4ec,stroke:#880e4f
+    classDef readTool fill:#e3f2fd,stroke:#1565c0
+    classDef writeTool fill:#ffecb3,stroke:#ff6f00
+    classDef webTool fill:#e0f2f1,stroke:#00695c
+    classDef mcpServer fill:#ede7f6,stroke:#4527a0
+    classDef acTool fill:#fbe9e7,stroke:#bf360c
+
+    class AC configNode
+    class SG,SR,SW,SC,SD,SCX specAgent
+    class PL,CD buildAgent
+    class QR,QF qaAgent
+    class IN,MR,CM utilAgent
+    class PRR,PRO,PRF prAgent
+    class RT_R,RT_G,RT_GR readTool
+    class WT_W,WT_E,WT_B writeTool
+    class WB_F,WB_S webTool
+    class C7,GR,LN,ACT,EL,PP mcpServer
+    class USS,GBP,RD,RG,GSC,UQS acTool
+```
+
+#### Agent-Tool Matrix
+
+The following table provides a quick reference for which tools each agent category can access:
+
+| Agent Category | Read | Write | Edit | Bash | Web | context7 | graphiti | linear | auto-claude | Browser |
+|---------------|:----:|:-----:|:----:|:----:|:---:|:--------:|:--------:|:------:|:-----------:|:-------:|
+| **Spec Gatherer** | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Spec Researcher** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Spec Writer** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Spec Critic** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Planner** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ⚪ | ✅ | ❌ |
+| **Coder** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ❌ |
+| **QA Reviewer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ⚪ |
+| **QA Fixer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ⚪ |
+| **PR Reviewer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+Legend: ✅ = Always available | ⚪ = Conditionally available | ❌ = Not available
+
+#### Tool Access Patterns
+
+**1. Least Privilege by Design**
+
+Each agent receives only the tools necessary for its function:
+
+```
+spec_gatherer:  Read-only + Web (cannot modify project)
+spec_writer:    Read + Write (can create spec files only)
+coder:          Full toolset (implements features)
+qa_reviewer:    Full + Browser (tests implementations)
+```
+
+**2. Progressive Tool Escalation**
+
+As tasks move through the pipeline, tool access expands:
+
+```
+Discovery Phase:  Read-only tools
+     │
+     ▼
+Planning Phase:   Read + Write + Web + Memory
+     │
+     ▼
+Coding Phase:     Full tools including Bash
+     │
+     ▼
+QA Phase:         Full tools + Browser automation
+```
+
+**3. Conditional Tool Injection**
+
+Some tools are added dynamically based on context:
+
+| Condition | Injected Tools | Use Case |
+|-----------|---------------|----------|
+| `LINEAR_API_KEY` set | Linear MCP | Project management sync |
+| Project is Electron | Electron MCP | Desktop app E2E testing |
+| Project is Web | Puppeteer MCP | Web app E2E testing |
+| `GRAPHITI_ENABLED` | Graphiti MCP | Cross-session memory |
+
+#### MCP Server Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MCP Server Lifecycle                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. Agent Session Start                                                  │
+│     │                                                                    │
+│     ├─► Look up agent_type in AGENT_CONFIGS                             │
+│     │                                                                    │
+│     ├─► Get mcp_servers list (required servers)                         │
+│     │                                                                    │
+│     ├─► Get mcp_servers_optional list                                   │
+│     │   └─► Check conditions (Linear enabled? Electron project?)        │
+│     │                                                                    │
+│     ├─► Start selected MCP server processes                             │
+│     │   ├─► Command servers: spawn subprocess (npx, npm exec)           │
+│     │   └─► HTTP servers: establish connection (graphiti, linear)       │
+│     │                                                                    │
+│     └─► Register MCP tools with Claude SDK client                       │
+│                                                                          │
+│  2. During Agent Session                                                 │
+│     │                                                                    │
+│     ├─► Agent calls MCP tools via standardized protocol                 │
+│     │   └─► Example: mcp__context7__query-docs(library, query)         │
+│     │                                                                    │
+│     └─► Responses streamed back through MCP connection                  │
+│                                                                          │
+│  3. Agent Session End                                                    │
+│     │                                                                    │
+│     └─► MCP server processes terminated automatically                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Auto-Claude Tools Usage by Agent
+
+| Tool | Planner | Coder | QA Reviewer | QA Fixer |
+|------|:-------:|:-----:|:-----------:|:--------:|
+| `get_build_progress` | ✅ | ✅ | ✅ | ✅ |
+| `update_subtask_status` | ✅ | ✅ | ✅ | ✅ |
+| `record_discovery` | ✅ | ✅ | ❌ | ✅ |
+| `record_gotcha` | ❌ | ✅ | ❌ | ✅ |
+| `get_session_context` | ✅ | ✅ | ✅ | ✅ |
+| `update_qa_status` | ❌ | ❌ | ✅ | ✅ |
+
+**Tool Purposes:**
+- `get_build_progress` — Retrieve current implementation status and next subtask
+- `update_subtask_status` — Mark subtasks as in_progress/completed/failed
+- `record_discovery` — Save codebase insights for future sessions
+- `record_gotcha` — Document pitfalls to avoid in future sessions
+- `get_session_context` — Retrieve discoveries and gotchas from past sessions
+- `update_qa_status` — Set QA approval/rejection status with issues list

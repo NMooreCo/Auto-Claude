@@ -1716,10 +1716,10 @@ Extended thinking allows Claude to reason more deeply before responding:
 | Level | Tokens | Use Case | Agents |
 |-------|--------|----------|--------|
 | `none` | Disabled | Fast responses, coding | Coder |
-| `low` | — | Simple analysis | Merge resolver, Commit message |
-| `medium` | 5,000 | Moderate reasoning | Spec gatherer, QA fixer |
-| `high` | 10,000 | Complex analysis | Planner, QA reviewer |
-| `ultrathink` | 16,000 | Deep self-critique | Spec critic |
+| `low` | 1,024 | Simple analysis | Merge resolver, Commit message |
+| `medium` | 4,096 | Moderate reasoning | Spec gatherer, QA fixer |
+| `high` | 16,384 | Complex analysis | Planner, QA reviewer |
+| `ultrathink` | 63,999 | Deep self-critique | Spec critic |
 
 ### Phase-Aware Tool Configuration
 
@@ -5253,10 +5253,10 @@ flowchart TB
 
 | Agent | Base Tools | MCP Servers | Extended Thinking |
 |-------|------------|-------------|-------------------|
-| **Planner** | Read, Write, Glob, Grep, WebSearch | context7, auto-claude, graphiti | Medium (5000 tokens) |
-| **Coder** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti | High (10000 tokens) |
-| **QA Reviewer** | Read, Write, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | Medium (5000 tokens) |
-| **QA Fixer** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | High (10000 tokens) |
+| **Planner** | Read, Write, Glob, Grep, WebSearch | context7, auto-claude, graphiti | High (16,384 tokens) |
+| **Coder** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti | None (disabled) |
+| **QA Reviewer** | Read, Write, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | High (16,384 tokens) |
+| **QA Fixer** | Read, Write, Edit, Glob, Grep, Bash, WebSearch | context7, auto-claude, graphiti, electron*, puppeteer* | Medium (4,096 tokens) |
 
 *\*electron/puppeteer MCP only available when project capabilities include Electron or web apps*
 
@@ -5359,7 +5359,7 @@ flowchart TB
     %% Build agents connections
     PL --> RT_R & RT_G & RT_GR & WT_W & WT_E & WB_F & WB_S
     PL --> C7 & GR & ACT
-    PL --> USS & GBP & RD & GSC
+    PL --> GBP & RD & GSC
 
     CD --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
     CD --> C7 & GR & ACT
@@ -5368,13 +5368,13 @@ flowchart TB
     %% QA agents connections
     QR --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
     QR --> C7 & GR & ACT
-    QR --> USS & GBP & GSC & UQS
+    QR --> GBP & GSC & UQS
     QR -.->|"if Electron"| EL
     QR -.->|"if Web"| PP
 
     QF --> RT_R & RT_G & RT_GR & WT_W & WT_E & WT_B & WB_F & WB_S
     QF --> C7 & GR & ACT
-    QF --> USS & GBP & RD & RG & GSC & UQS
+    QF --> USS & GBP & RG & UQS
     QF -.->|"if Electron"| EL
     QF -.->|"if Web"| PP
 
@@ -5428,13 +5428,13 @@ The following table provides a quick reference for which tools each agent catego
 |---------------|:----:|:-----:|:----:|:----:|:---:|:--------:|:--------:|:------:|:-----------:|:-------:|
 | **Spec Gatherer** | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Spec Researcher** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Spec Writer** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Spec Writer** | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Spec Critic** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Planner** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ⚪ | ✅ | ❌ |
+| **Planner** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ❌ |
 | **Coder** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ❌ |
 | **QA Reviewer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ⚪ |
 | **QA Fixer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚪ | ✅ | ⚪ |
-| **PR Reviewer** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **PR Reviewer** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 Legend: ✅ = Always available | ⚪ = Conditionally available | ❌ = Not available
 
@@ -5520,10 +5520,10 @@ Some tools are added dynamically based on context:
 | Tool | Planner | Coder | QA Reviewer | QA Fixer |
 |------|:-------:|:-----:|:-----------:|:--------:|
 | `get_build_progress` | ✅ | ✅ | ✅ | ✅ |
-| `update_subtask_status` | ✅ | ✅ | ✅ | ✅ |
-| `record_discovery` | ✅ | ✅ | ❌ | ✅ |
+| `update_subtask_status` | ❌ | ✅ | ❌ | ✅ |
+| `record_discovery` | ✅ | ✅ | ❌ | ❌ |
 | `record_gotcha` | ❌ | ✅ | ❌ | ✅ |
-| `get_session_context` | ✅ | ✅ | ✅ | ✅ |
+| `get_session_context` | ✅ | ✅ | ✅ | ❌ |
 | `update_qa_status` | ❌ | ❌ | ✅ | ✅ |
 
 **Tool Purposes:**

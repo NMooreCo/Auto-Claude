@@ -2789,4 +2789,535 @@ Worktree operations are designed to work across Windows, macOS, and Linux:
 
 ---
 
+## Frontend-Backend Communication
+
+Auto Claude's desktop application uses **Electron** for the frontend, enabling a native desktop experience with web technologies. The communication between the React renderer and the Python backend occurs through a carefully designed IPC (Inter-Process Communication) layer that ensures security, type safety, and modularity.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      ELECTRON PROCESS ARCHITECTURE                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                         RENDERER PROCESS                                  │    │
+│  │  (React UI, Zustand stores, user interactions)                           │    │
+│  │                                                                           │    │
+│  │  window.electronAPI.startTask(...)  ───┐                                 │    │
+│  │  window.electronAPI.onTaskProgress(cb) ◄───────────┐                     │    │
+│  └──────────────────────────────────────────┼─────────┼─────────────────────┘    │
+│                                             │         │                          │
+│                                             │         │ contextBridge            │
+│                                             ▼         │                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                         PRELOAD SCRIPT                                    │    │
+│  │  (Secure bridge via contextBridge.exposeInMainWorld)                     │    │
+│  │                                                                           │    │
+│  │  ipcRenderer.send('task:start', taskId)  ───┐                            │    │
+│  │  ipcRenderer.on('task:progress', cb)  ◄─────┼─────────┐                  │    │
+│  └──────────────────────────────────────────────┼─────────┼─────────────────┘    │
+│                                                 │         │                      │
+│                                                 │ IPC     │                      │
+│                                                 ▼         │                      │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                          MAIN PROCESS                                     │    │
+│  │  (Node.js runtime, IPC handlers, subprocess management)                  │    │
+│  │                                                                           │    │
+│  │  ipcMain.handle('task:start', handler)                                   │    │
+│  │  mainWindow.webContents.send('task:progress', data) ──────────────────┘  │    │
+│  │                                                                           │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │    │
+│  │  │ AgentManager │  │TerminalMgr  │  │ PythonEnvMgr │                   │    │
+│  │  └──────┬───────┘  └──────────────┘  └──────────────┘                   │    │
+│  └─────────┼───────────────────────────────────────────────────────────────┘    │
+│            │ child_process.spawn()                                               │
+│            ▼                                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                        PYTHON BACKEND                                     │    │
+│  │  (spec_runner.py, run.py, agent sessions)                                │    │
+│  │                                                                           │    │
+│  │  stdout/stderr ─────► AgentManager events ─────► IPC ─────► Renderer    │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Electron Security Model
+
+Auto Claude follows Electron security best practices with strict process isolation:
+
+```typescript
+// apps/frontend/src/main/index.ts - Window creation
+const mainWindow = new BrowserWindow({
+  webPreferences: {
+    contextIsolation: true,     // Renderer can't access Node.js
+    nodeIntegration: false,     // No require() in renderer
+    sandbox: false,             // Required for node-pty terminal
+    preload: join(__dirname, '../preload/index.js'),
+  },
+});
+```
+
+**Security Configuration:**
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `contextIsolation` | `true` | Prevents renderer from accessing Node.js APIs directly |
+| `nodeIntegration` | `false` | No `require()` or Node.js globals in renderer |
+| `sandbox` | `false` | Disabled to allow node-pty for terminal functionality |
+| `preload` | Configured | Secure bridge between renderer and main process |
+
+### IPC Handler Organization
+
+IPC handlers are organized by domain into modular handler files, ensuring separation of concerns and maintainability.
+
+#### Handler Module Index
+
+```typescript
+// apps/frontend/src/main/ipc-handlers/index.ts
+export function setupIpcHandlers(
+  agentManager: AgentManager,
+  terminalManager: TerminalManager,
+  getMainWindow: () => BrowserWindow | null,
+  pythonEnvManager: PythonEnvManager
+): void {
+  // Domain-specific handlers
+  registerProjectHandlers(pythonEnvManager, agentManager, getMainWindow);
+  registerTaskHandlers(agentManager, pythonEnvManager, getMainWindow);
+  registerTerminalHandlers(terminalManager, getMainWindow);
+  registerAgenteventsHandlers(agentManager, getMainWindow);
+  registerSettingsHandlers(agentManager, getMainWindow);
+  registerFileHandlers();
+  registerGithubHandlers(agentManager, getMainWindow);
+  registerGitlabHandlers(agentManager, getMainWindow);
+  registerRoadmapHandlers(agentManager, getMainWindow);
+  registerIdeationHandlers(agentManager, getMainWindow);
+  registerInsightsHandlers(getMainWindow);
+  registerMemoryHandlers();
+  registerMcpHandlers();
+  // ... 20+ domain-specific handler modules
+}
+```
+
+#### Handler Domains
+
+| Domain | Handler File | Purpose |
+|--------|--------------|---------|
+| **Project** | `project-handlers.ts` | Project CRUD, initialization, settings |
+| **Task** | `task-handlers.ts` → `task/*.ts` | Task lifecycle, worktree management |
+| **Terminal** | `terminal-handlers.ts` | PTY session management, Claude profiles |
+| **Agent Events** | `agent-events-handlers.ts` | Event forwarding from AgentManager |
+| **Settings** | `settings-handlers.ts` | App settings, dialog operations |
+| **File** | `file-handlers.ts` | File system operations |
+| **GitHub** | `github-handlers.ts` → `github/*.ts` | PR review, issue triage, auto-fix |
+| **GitLab** | `gitlab-handlers.ts` → `gitlab/*.ts` | MR review, issue triage |
+| **Roadmap** | `roadmap-handlers.ts` | AI roadmap generation |
+| **Ideation** | `ideation-handlers.ts` → `ideation/*.ts` | Feature ideation |
+| **Insights** | `insights-handlers.ts` | AI-powered chat insights |
+| **Memory** | `memory-handlers.ts` | Graphiti/LadybugDB integration |
+| **Context** | `context-handlers.ts` → `context/*.ts` | Project context, memory search |
+| **Claude Profiles** | `profile-handlers.ts` | Multi-account OAuth management |
+| **MCP** | `mcp-handlers.ts` | MCP server health checks |
+| **Debug** | `debug-handlers.ts` | Logs, debug info, error reporting |
+
+### Preload Bridge Pattern
+
+The preload script creates a secure bridge between the renderer and main process using Electron's `contextBridge` API.
+
+#### Preload Structure
+
+```typescript
+// apps/frontend/src/preload/index.ts
+import { contextBridge } from 'electron';
+import { createElectronAPI } from './api';
+
+const electronAPI = createElectronAPI();
+contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+```
+
+#### API Module Composition
+
+```typescript
+// apps/frontend/src/preload/api/index.ts
+export const createElectronAPI = (): ElectronAPI => ({
+  ...createProjectAPI(),    // Project operations
+  ...createTerminalAPI(),   // Terminal/Claude profile operations
+  ...createTaskAPI(),       // Task lifecycle
+  ...createSettingsAPI(),   // Settings operations
+  ...createFileAPI(),       // File operations
+  ...createAgentAPI(),      // Combines: Roadmap, Ideation, Insights, Changelog, Linear, GitHub, GitLab, Shell
+  ...createAppUpdateAPI(),  // Auto-update operations
+  ...createProfileAPI(),    // API profile management
+  github: createGitHubAPI() // GitHub-specific nested API
+});
+```
+
+#### Communication Patterns
+
+**Request-Response (invoke/handle):**
+
+```typescript
+// Preload: apps/frontend/src/preload/api/task-api.ts
+getTasks: (projectId: string): Promise<IPCResult<Task[]>> =>
+  ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST, projectId),
+
+// Main: apps/frontend/src/main/ipc-handlers/task-handlers.ts
+ipcMain.handle(IPC_CHANNELS.TASK_LIST, async (_, projectId: string) => {
+  const tasks = projectStore.getTasks(projectId);
+  return { success: true, data: tasks };
+});
+```
+
+**Fire-and-Forget (send):**
+
+```typescript
+// Preload
+startTask: (taskId: string, options?: TaskStartOptions): void =>
+  ipcRenderer.send(IPC_CHANNELS.TASK_START, taskId, options),
+
+// Main
+ipcMain.on(IPC_CHANNELS.TASK_START, (_, taskId, options) => {
+  agentManager.startTaskExecution(taskId, projectPath, specId, options);
+});
+```
+
+**Event Subscription (send → on):**
+
+```typescript
+// Preload - subscribe to events from main
+onTaskProgress: (callback: (taskId, plan, projectId?) => void) => {
+  const handler = (_, taskId, plan, projectId) => callback(taskId, plan, projectId);
+  ipcRenderer.on(IPC_CHANNELS.TASK_PROGRESS, handler);
+  return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_PROGRESS, handler);
+},
+
+// Main - emit events to renderer
+agentManager.on('progress', (taskId, plan) => {
+  mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, plan, projectId);
+});
+```
+
+### IPC Channel Naming Convention
+
+IPC channels follow a consistent `domain:operation` naming pattern:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         IPC CHANNEL CATEGORIES                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Operations (Renderer → Main):                                                  │
+│  ├── task:list          - Request data                                         │
+│  ├── task:create        - Create resource                                      │
+│  ├── task:delete        - Delete resource                                      │
+│  ├── task:start         - Trigger action                                       │
+│  └── task:worktreeMerge - Complex operation                                    │
+│                                                                                  │
+│  Events (Main → Renderer):                                                      │
+│  ├── task:progress      - Progress updates                                     │
+│  ├── task:error         - Error notifications                                  │
+│  ├── task:statusChange  - State change notifications                           │
+│  └── task:log           - Log streaming                                        │
+│                                                                                  │
+│  Domain Examples:                                                               │
+│  ├── project:*          - Project management                                   │
+│  ├── terminal:*         - Terminal operations                                  │
+│  ├── github:*           - GitHub integration                                   │
+│  ├── github:pr:*        - GitHub PR operations (nested)                       │
+│  ├── github:autofix:*   - GitHub auto-fix operations (nested)                 │
+│  └── claude:*           - Claude profile management                           │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Channel Categories:**
+
+| Category | Pattern | Examples |
+|----------|---------|----------|
+| **CRUD** | `domain:verb` | `task:list`, `task:create`, `task:delete` |
+| **Actions** | `domain:action` | `task:start`, `task:stop`, `task:review` |
+| **Events** | `domain:eventType` | `task:progress`, `task:error`, `task:log` |
+| **Nested** | `domain:sub:operation` | `github:pr:review`, `github:autofix:start` |
+| **Settings** | `settings:verb` | `settings:get`, `settings:save` |
+
+### Agent Manager and Process Lifecycle
+
+The `AgentManager` orchestrates Python subprocess lifecycle, managing spec creation, task execution, and QA processes.
+
+#### AgentManager Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          AGENT MANAGER ARCHITECTURE                               │
+│                          (apps/frontend/src/main/agent/)                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │                         AgentManager (Facade)                              │  │
+│  │  Orchestrates agent lifecycle, provides unified API                       │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                           │
+│           ┌──────────────────────────┼──────────────────────────┐               │
+│           ▼                          ▼                          ▼               │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐            │
+│  │   AgentState    │    │  AgentEvents    │    │ AgentProcess    │            │
+│  │  (State mgmt)   │    │ (Event routing) │    │ (Process spawn) │            │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘            │
+│                                                          │                      │
+│                                                          ▼                      │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │                        AgentQueueManager                                    │  │
+│  │  Manages queue for roadmap, ideation, and batch operations                │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Process Types
+
+| Process Type | Entry Point | Trigger | Purpose |
+|--------------|-------------|---------|---------|
+| `spec-creation` | `spec_runner.py` | User creates task | Create spec, then auto-chain to `run.py` |
+| `task-execution` | `run.py --spec` | After spec creation or resume | Execute implementation plan |
+| `qa-process` | `run.py --qa` | After build completion | Run QA validation loop |
+| `roadmap` | `roadmap_runner.py` | User generates roadmap | AI roadmap generation |
+| `ideation` | `ideation_runner.py` | User requests ideas | Feature ideation |
+
+#### Process Spawn Flow
+
+```typescript
+// apps/frontend/src/main/agent/agent-manager.ts
+async startSpecCreation(taskId, projectPath, taskDescription, specDir?, metadata?, baseBranch?) {
+  // 1. Pre-flight auth check
+  const profileManager = await initializeClaudeProfileManager();
+  if (!profileManager.hasValidAuth()) {
+    this.emit('error', taskId, 'Claude authentication required');
+    return;
+  }
+
+  // 2. Ensure Python environment is ready
+  const pythonStatus = await this.processManager.ensurePythonEnvReady();
+  if (!pythonStatus.ready) {
+    this.emit('error', taskId, `Python environment not ready: ${pythonStatus.error}`);
+    return;
+  }
+
+  // 3. Build command arguments
+  const args = [specRunnerPath, '--task', taskDescription, '--project-dir', projectPath];
+  if (specDir) args.push('--spec-dir', specDir);
+  if (baseBranch) args.push('--base-branch', baseBranch);
+  if (!metadata?.requireReviewBeforeCoding) args.push('--auto-approve');
+  if (metadata?.model) args.push('--model', metadata.model);
+
+  // 4. Store context for restart capability
+  this.storeTaskContext(taskId, projectPath, '', {}, true, taskDescription);
+
+  // 5. Spawn Python subprocess
+  await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
+}
+```
+
+#### Process Output Handling
+
+```typescript
+// apps/frontend/src/main/agent/agent-process.ts
+async spawnProcess(taskId, cwd, args, env, processType) {
+  const process = spawn(this.getPythonPath(), args, {
+    cwd,
+    env: { ...process.env, ...env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  // Stream stdout/stderr to event emitter
+  process.stdout.on('data', (data) => {
+    const output = data.toString();
+    this.events.emitLog(taskId, output);
+
+    // Parse phase events from output (e.g., "PHASE:coding")
+    const phaseEvent = this.parsePhaseEvent(output);
+    if (phaseEvent) {
+      this.events.emitExecutionProgress(taskId, phaseEvent);
+    }
+  });
+
+  process.on('exit', (code) => {
+    this.events.emitExit(taskId, code, processType);
+  });
+}
+```
+
+### Event Flow: Task Execution Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        TASK EXECUTION EVENT FLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. USER CLICKS "START TASK"                                                    │
+│     │                                                                            │
+│     ▼                                                                            │
+│  [Renderer] window.electronAPI.startTask(taskId, options)                       │
+│     │                                                                            │
+│     ▼ ipcRenderer.send('task:start', taskId, options)                           │
+│  [Preload]                                                                       │
+│     │                                                                            │
+│     ▼ ipcMain.on('task:start', handler)                                         │
+│  [Main Process]                                                                  │
+│     │                                                                            │
+│     ▼ agentManager.startTaskExecution(taskId, ...)                              │
+│  [AgentManager]                                                                  │
+│     │                                                                            │
+│     ▼ spawn('python', ['run.py', '--spec', specId, ...])                        │
+│  [Python Backend]                                                                │
+│     │                                                                            │
+│  2. PYTHON PROCESS RUNS                                                          │
+│     │                                                                            │
+│     ▼ stdout: "PHASE:planning"                                                  │
+│  [AgentProcess] → events.emitExecutionProgress(taskId, {phase: 'planning'})     │
+│     │                                                                            │
+│     ▼ agentManager.on('execution-progress', handler)                            │
+│  [agent-events-handlers.ts]                                                      │
+│     │                                                                            │
+│     ▼ mainWindow.webContents.send('task:executionProgress', taskId, progress)   │
+│  [IPC to Renderer]                                                               │
+│     │                                                                            │
+│     ▼ window.electronAPI.onTaskExecutionProgress(callback)                      │
+│  [Renderer] → Zustand store update → React re-render                            │
+│                                                                                  │
+│  3. FILE WATCHER DETECTS PLAN CHANGES                                           │
+│     │                                                                            │
+│     ▼ fileWatcher.on('progress', (taskId, plan) => ...)                         │
+│  [FileWatcher]                                                                   │
+│     │                                                                            │
+│     ▼ mainWindow.webContents.send('task:progress', taskId, plan)                │
+│  [IPC to Renderer]                                                               │
+│     │                                                                            │
+│     ▼ window.electronAPI.onTaskProgress(callback)                               │
+│  [Renderer] → Update subtask progress in UI                                      │
+│                                                                                  │
+│  4. PROCESS EXITS                                                                │
+│     │                                                                            │
+│     ▼ process.on('exit', code)                                                  │
+│  [AgentProcess] → events.emitExit(taskId, code, processType)                    │
+│     │                                                                            │
+│     ▼ Determine final status based on code and subtask completion               │
+│  [agent-events-handlers.ts]                                                      │
+│     │                                                                            │
+│     ▼ Send status change, trigger notification                                  │
+│  [IPC to Renderer] → Show "Review Needed" notification                          │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Status Management and Phase Transitions
+
+The frontend tracks task execution phases to prevent invalid state transitions:
+
+```typescript
+// apps/frontend/src/main/ipc-handlers/agent-events-handlers.ts
+function validateStatusTransition(task, newStatus, phase): boolean {
+  // Don't allow human_review without subtasks (still planning)
+  if (newStatus === 'human_review' && (!task.subtasks || task.subtasks.length === 0)) {
+    return false;
+  }
+
+  // Block transitions from terminal phases
+  if (isTerminalPhase(task.executionProgress?.phase)) {
+    return false;
+  }
+
+  // Block phase regression (e.g., qa_review → coding)
+  if (wouldPhaseRegress(task.executionProgress?.phase, phase)) {
+    return false;
+  }
+
+  return true;
+}
+```
+
+**Phase-to-Status Mapping:**
+
+| Execution Phase | Task Status | UI State |
+|-----------------|-------------|----------|
+| `idle` | (no change) | Not started |
+| `planning` | `in_progress` | Planning... |
+| `coding` | `in_progress` | Coding... |
+| `qa_review` | `ai_review` | QA reviewing... |
+| `qa_fixing` | `ai_review` | QA fixing... |
+| `complete` | `human_review` | Ready for review |
+| `failed` | `human_review` | Needs attention |
+
+### Rate Limit Handling
+
+Auto Claude detects SDK rate limits and supports automatic profile switching:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        RATE LIMIT HANDLING FLOW                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Rate limit detected in Python process stdout                                │
+│     ├── Pattern: "RateLimitError" or HTTP 429                                   │
+│     └── detectRateLimit() parses reset time, request type                       │
+│                                                                                  │
+│  2. AgentManager emits 'sdk-rate-limit' event                                   │
+│     └── Includes: resetTime, requestType, profileId, taskId                     │
+│                                                                                  │
+│  3. IPC forwards to renderer via CLAUDE_SDK_RATE_LIMIT channel                  │
+│     └── Renderer shows rate limit modal with countdown                          │
+│                                                                                  │
+│  4. Auto-swap logic (if enabled):                                               │
+│     ├── ClaudeProfileManager.getBestProfile() finds available profile           │
+│     ├── If found: emit 'auto-swap-restart-task' event                          │
+│     ├── AgentManager.restartTask() with new profile                            │
+│     └── Task continues with different OAuth token                               │
+│                                                                                  │
+│  5. User intervention (if no auto-swap):                                        │
+│     ├── User waits for reset or manually switches profile                      │
+│     └── User clicks "Retry" to continue task                                   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Type Safety
+
+IPC communication is fully typed using shared TypeScript interfaces:
+
+```typescript
+// apps/frontend/src/shared/types/ipc.ts
+export interface IPCResult<T = void> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+// apps/frontend/src/shared/constants/ipc.ts
+export const IPC_CHANNELS = {
+  TASK_START: 'task:start',
+  TASK_PROGRESS: 'task:progress',
+  // ... 200+ channel definitions
+} as const;
+
+// Preload API typed interface
+export interface TaskAPI {
+  getTasks: (projectId: string) => Promise<IPCResult<Task[]>>;
+  startTask: (taskId: string, options?: TaskStartOptions) => void;
+  onTaskProgress: (callback: (taskId: string, plan: ImplementationPlan) => void) => () => void;
+  // ... fully typed operations
+}
+```
+
+### Best Practices
+
+1. **Use invoke/handle for request-response** - Returns promises with typed results
+2. **Use send/on for fire-and-forget and events** - One-way communication
+3. **Return cleanup functions from event subscriptions** - Prevents memory leaks
+4. **Include projectId in events** - Enables multi-project filtering
+5. **Validate state transitions** - Prevent invalid status changes
+6. **Use safeSendToRenderer()** - Handles null window gracefully
+7. **Organize handlers by domain** - Maintain modularity and separation of concerns
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

@@ -4017,4 +4017,535 @@ ELECTRON_MCP_ENABLED=true
 
 ---
 
-<!-- Subsequent sections will be added in following subtasks -->
+## Data Flow and File Structure
+
+This section documents how data flows through Auto Claude and how files are organized across the system.
+
+### Project File Structure
+
+Auto Claude follows a monorepo structure with clear separation between the backend (Python) and frontend (Electron):
+
+```
+autonomous-coding/
+├── apps/
+│   ├── backend/                    # Python CLI and agent system
+│   │   ├── agents/                 # Agent implementations
+│   │   │   ├── coder.py           # Main autonomous coder loop
+│   │   │   ├── planner.py         # Implementation planning
+│   │   │   ├── session.py         # Session management
+│   │   │   ├── memory_manager.py  # Graphiti memory integration
+│   │   │   ├── utils.py           # Git operations, plan loading
+│   │   │   └── tools_pkg/         # Tool configurations (AGENT_CONFIGS)
+│   │   ├── cli/                    # Command-line interface
+│   │   │   ├── main.py            # Entry point and argument parsing
+│   │   │   ├── build_commands.py  # Build execution commands
+│   │   │   ├── qa_commands.py     # QA validation commands
+│   │   │   ├── workspace_commands.py # Worktree operations
+│   │   │   └── batch_commands.py  # Batch operations
+│   │   ├── core/                   # Core infrastructure
+│   │   │   ├── client.py          # Claude SDK client factory
+│   │   │   ├── auth.py            # OAuth token management
+│   │   │   ├── worktree.py        # Git worktree manager
+│   │   │   ├── workspace.py       # Workspace setup/finalization
+│   │   │   └── platform/          # Cross-platform utilities
+│   │   ├── integrations/          # External integrations
+│   │   │   ├── graphiti/          # Memory system
+│   │   │   └── linear/            # Project management
+│   │   ├── project/               # Project analysis
+│   │   │   ├── analyzer.py        # Technology stack detection
+│   │   │   ├── models.py          # SecurityProfile dataclass
+│   │   │   └── command_registry/  # Command allowlists per technology
+│   │   ├── prompts/               # Agent system prompts
+│   │   │   ├── coder.md           # Coder agent instructions
+│   │   │   ├── planner.md         # Planner agent instructions
+│   │   │   ├── qa_reviewer.md     # QA reviewer instructions
+│   │   │   ├── qa_fixer.md        # QA fixer instructions
+│   │   │   └── spec_*.md          # Spec creation prompts
+│   │   ├── qa/                     # QA validation system
+│   │   │   ├── loop.py            # QA → Fix → QA loop
+│   │   │   ├── reviewer.py        # QA reviewer agent
+│   │   │   └── fixer.py           # QA fixer agent
+│   │   ├── runners/               # Specialized runners
+│   │   │   └── github/            # GitHub integration
+│   │   ├── security/              # Security enforcement
+│   │   │   ├── hooks.py           # Bash command validation hook
+│   │   │   └── validator.py       # Specialized command validators
+│   │   ├── spec/                   # Spec creation system
+│   │   │   ├── pipeline/          # Spec orchestration
+│   │   │   ├── phases/            # Phase implementations
+│   │   │   └── complexity.py      # Complexity assessment
+│   │   ├── run.py                 # CLI entry point
+│   │   └── spec_runner.py         # Spec creation entry point
+│   │
+│   └── frontend/                   # Electron desktop app
+│       └── src/
+│           ├── main/              # Main process (Node.js)
+│           │   ├── index.ts       # Electron app entry
+│           │   ├── agent/         # AgentManager and subprocess handling
+│           │   ├── ipc-handlers/  # IPC handler modules
+│           │   ├── terminal/      # PTY terminal manager
+│           │   └── platform/      # Platform abstraction
+│           ├── preload/           # Preload bridge
+│           │   └── api/           # Domain API modules
+│           ├── renderer/          # React UI
+│           │   ├── App.tsx        # Main app component
+│           │   ├── components/    # UI components
+│           │   └── stores/        # Zustand state stores
+│           └── shared/            # Shared types and i18n
+│
+├── guides/                         # Documentation
+│   └── ARCHITECTURE.md            # This document
+├── tests/                          # Test suite
+├── scripts/                        # Build and release scripts
+└── .auto-claude/                   # Per-project data (gitignored)
+```
+
+### Per-Project Data Structure
+
+Auto Claude stores all project-specific data in the `.auto-claude/` directory at the project root:
+
+```
+project-root/
+├── .auto-claude/
+│   ├── specs/                      # Spec directories
+│   │   └── XXX-feature-name/       # Individual spec
+│   │       ├── spec.md             # Feature specification
+│   │       ├── requirements.json   # Structured requirements
+│   │       ├── context.json        # Codebase context
+│   │       ├── implementation_plan.json  # Subtask plan with status
+│   │       ├── qa_report.md        # QA validation results
+│   │       ├── QA_FIX_REQUEST.md   # Issues to fix (when rejected)
+│   │       ├── build-progress.txt  # Human-readable progress
+│   │       ├── task_logs.json      # Session logs
+│   │       ├── task_metadata.json  # Task configuration
+│   │       └── memory/             # Per-spec memory
+│   │           ├── discoveries.json
+│   │           ├── gotchas.json
+│   │           └── patterns.json
+│   │
+│   ├── worktrees/                  # Isolated workspaces
+│   │   └── tasks/                  # Task worktrees
+│   │       └── XXX-feature-name/   # Worktree directory
+│   │           └── ...             # Full project copy
+│   │
+│   └── memories/                   # Global memory (Graphiti/LadybugDB)
+│
+├── .auto-claude-security.json      # Cached security profile
+├── .auto-claude-status             # Current execution status
+└── .claude_settings.json           # Claude Code settings
+```
+
+### Spec Artifact Files
+
+Each spec directory contains a set of artifacts that evolve through the pipeline:
+
+| File | Created By | Purpose | Format |
+|------|------------|---------|--------|
+| `spec.md` | Spec Writer | Feature specification document | Markdown |
+| `requirements.json` | Requirements Agent | Structured user requirements | JSON |
+| `context.json` | Context Agent | Relevant files and patterns | JSON |
+| `implementation_plan.json` | Planner Agent | Subtask-based plan with status | JSON |
+| `qa_report.md` | QA Reviewer | Validation results | Markdown |
+| `QA_FIX_REQUEST.md` | QA Reviewer | Issues needing fixes | Markdown |
+| `build-progress.txt` | Coder Agent | Human-readable session log | Text |
+| `task_logs.json` | Session Manager | Detailed execution logs | JSON |
+| `task_metadata.json` | Frontend | Task configuration | JSON |
+
+#### Implementation Plan Structure
+
+The `implementation_plan.json` is the central state file:
+
+```json
+{
+  "feature": "Add user authentication",
+  "planType": "code",
+  "workflow_type": "feature",
+  "phases": [
+    {
+      "phase": 1,
+      "name": "Setup",
+      "type": "setup",
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create auth middleware",
+          "status": "completed",
+          "service": "backend",
+          "notes": "Implemented JWT validation"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Add login endpoint",
+          "status": "in_progress",
+          "service": "backend"
+        }
+      ]
+    }
+  ],
+  "qa_signoff": {
+    "status": "approved|rejected|pending",
+    "issues": [],
+    "tests_passed": "yes|no|partial"
+  },
+  "status": "in_progress",
+  "last_updated": "2024-01-20T12:00:00Z"
+}
+```
+
+**Subtask Statuses:**
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Not yet started |
+| `in_progress` | Currently being implemented |
+| `completed` | Successfully finished |
+| `stuck` | Failed multiple times, needs intervention |
+| `blocked` | Waiting for dependency or human input |
+
+### Data Flow: Spec Creation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        SPEC CREATION DATA FLOW                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  USER INPUT                                                                      │
+│  "Add dark mode toggle to settings"                                             │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  1. DISCOVERY PHASE                                                       │    │
+│  │     ├── Read: Project structure, package.json, existing code             │    │
+│  │     └── Write: project_index.json (internal)                             │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  2. REQUIREMENTS PHASE                                                    │    │
+│  │     ├── Read: Discovery output, user clarifications                      │    │
+│  │     └── Write: requirements.json                                          │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  3. CONTEXT PHASE                                                         │    │
+│  │     ├── Read: Requirements, codebase files                               │    │
+│  │     └── Write: context.json (relevant files, patterns)                   │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  4. SPEC WRITING PHASE                                                    │    │
+│  │     ├── Read: Requirements, context, existing docs                       │    │
+│  │     └── Write: spec.md                                                    │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  5. PLANNING PHASE                                                        │    │
+│  │     ├── Read: Spec, context, patterns                                    │    │
+│  │     └── Write: implementation_plan.json                                   │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  OUTPUT: Complete spec directory ready for implementation                       │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow: Implementation Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        IMPLEMENTATION DATA FLOW                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  INPUT: Approved spec directory                                                  │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  1. WORKSPACE SETUP                                                       │    │
+│  │     ├── Create: Git worktree at .auto-claude/worktrees/tasks/XXX/        │    │
+│  │     ├── Copy: .env files, security config                                │    │
+│  │     ├── Symlink: node_modules                                             │    │
+│  │     └── Copy: Spec files to worktree                                     │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  2. CODER AGENT LOOP                                                      │    │
+│  │     │                                                                      │    │
+│  │     │  For each subtask:                                                   │    │
+│  │     │  ┌──────────────────────────────────────────────────────────────┐   │    │
+│  │     │  │  a. Read: implementation_plan.json, context.json, spec.md    │   │    │
+│  │     │  │  b. Read: Memory context (Graphiti)                          │   │    │
+│  │     │  │  c. Execute: Implement subtask                                │   │    │
+│  │     │  │  d. Write: Modified source files                              │   │    │
+│  │     │  │  e. Write: Git commit                                         │   │    │
+│  │     │  │  f. Update: implementation_plan.json (status → completed)    │   │    │
+│  │     │  │  g. Update: build-progress.txt (session log)                  │   │    │
+│  │     │  │  h. Write: Memory insights (Graphiti)                         │   │    │
+│  │     │  └──────────────────────────────────────────────────────────────┘   │    │
+│  │     │                                                                      │    │
+│  │     └── Loop until all subtasks completed                                 │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  3. QA VALIDATION LOOP                                                    │    │
+│  │     │                                                                      │    │
+│  │     │  ┌──────────────────────────────────────────────────────────────┐   │    │
+│  │     │  │  QA Reviewer:                                                  │   │    │
+│  │     │  │  ├── Read: spec.md, implementation_plan.json, source files    │   │    │
+│  │     │  │  ├── Execute: Tests, browser verification                     │   │    │
+│  │     │  │  ├── Write: qa_report.md                                       │   │    │
+│  │     │  │  └── Update: implementation_plan.json (qa_signoff)            │   │    │
+│  │     │  └──────────────────────────────────────────────────────────────┘   │    │
+│  │     │           │                                                          │    │
+│  │     │           ├── If approved → Exit loop                               │    │
+│  │     │           │                                                          │    │
+│  │     │           └── If rejected ↓                                         │    │
+│  │     │                                                                      │    │
+│  │     │  ┌──────────────────────────────────────────────────────────────┐   │    │
+│  │     │  │  QA Fixer:                                                     │   │    │
+│  │     │  │  ├── Read: QA_FIX_REQUEST.md, qa_report.md                    │   │    │
+│  │     │  │  ├── Execute: Apply fixes                                      │   │    │
+│  │     │  │  ├── Write: Modified source files                              │   │    │
+│  │     │  │  └── Write: Git commit                                         │   │    │
+│  │     │  └──────────────────────────────────────────────────────────────┘   │    │
+│  │     │           │                                                          │    │
+│  │     └───────────┴── Loop back to QA Reviewer                              │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│      │                                                                           │
+│      ▼                                                                           │
+│  OUTPUT: Complete implementation ready for human review                         │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow: Frontend-Backend Communication
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        FRONTEND-BACKEND DATA FLOW                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         RENDERER PROCESS (React)                            │ │
+│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────┐    │ │
+│  │  │ Zustand Store  │  │ React Components│  │ window.electronAPI          │    │ │
+│  │  │ (State)        │◄─│ (UI)           │◄─│ (IPC Bridge)                │    │ │
+│  │  └────────────────┘  └────────────────┘  └────────────────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│          ▲                                            │                          │
+│          │ State updates                              │ IPC calls                │
+│          │                                            ▼                          │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         PRELOAD BRIDGE                                       │ │
+│  │  ipcRenderer.invoke() / ipcRenderer.send() ←→ contextBridge                │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│          ▲                                            │                          │
+│          │ Events                                     │ Handlers                 │
+│          │                                            ▼                          │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         MAIN PROCESS (Electron)                              │ │
+│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────┐    │ │
+│  │  │ IPC Handlers   │  │ AgentManager   │  │ FileWatcher               │    │ │
+│  │  │ (20+ modules)  │─→│ (Subprocess)   │  │ (Plan changes)            │    │ │
+│  │  └────────────────┘  └────────────────┘  └────────────────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                  │                                               │
+│                                  │ spawn()                                       │
+│                                  ▼                                               │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         PYTHON BACKEND                                        │ │
+│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────┐    │ │
+│  │  │ spec_runner.py │  │ run.py         │  │ Claude Agent SDK           │    │ │
+│  │  │ (Spec creation)│  │ (Build exec)   │  │ (AI sessions)              │    │ │
+│  │  └────────────────┘  └────────────────┘  └────────────────────────────┘    │ │
+│  │                                  │                                           │ │
+│  │                                  │ File I/O                                  │ │
+│  │                                  ▼                                           │ │
+│  │  ┌────────────────────────────────────────────────────────────────────────┐ │ │
+│  │  │                    .auto-claude/ DIRECTORY                               │ │ │
+│  │  │  specs/XXX/implementation_plan.json ←── State persistence               │ │ │
+│  │  │  specs/XXX/build-progress.txt ←── Human-readable logs                   │ │ │
+│  │  │  worktrees/tasks/XXX/ ←── Isolated workspace                            │ │ │
+│  │  └────────────────────────────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Data Paths:**
+
+| Data Type | Source | Destination | Format |
+|-----------|--------|-------------|--------|
+| Task description | User → Frontend | Backend → spec.md | Text |
+| Execution progress | Backend → Files | Frontend → Zustand | JSON/Events |
+| Subtask status | Backend → plan.json | Frontend → UI | JSON |
+| Agent output | Python stdout | Frontend → Terminal | Text stream |
+| File changes | Worktree → Git | Plan → status update | Git commits |
+| Memory context | Graphiti → Agent | Session → Response | JSON |
+
+### Configuration Files
+
+Auto Claude uses several configuration files at different scopes:
+
+#### Project-Level Configuration
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `.auto-claude-security.json` | Project root | Cached security profile (command allowlist) |
+| `.auto-claude-status` | Project root | Current execution status (for ccstatusline) |
+| `.claude_settings.json` | Project root | Claude Code editor settings |
+| `.auto-claude/.env` | .auto-claude/ | Per-project environment overrides |
+
+#### Backend Configuration
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `apps/backend/.env` | Backend root | Environment variables (API keys, integrations) |
+| `apps/backend/.env.example` | Backend root | Template for required variables |
+| `apps/backend/spec_contract.json` | Backend root | Spec validation schema |
+
+#### Security Profile Structure
+
+The `.auto-claude-security.json` caches the detected command allowlist:
+
+```json
+{
+  "version": "1.0",
+  "generated_at": "2024-01-20T12:00:00Z",
+  "project_hash": "abc123...",
+  "profile": {
+    "base_commands": ["ls", "cat", "git", "echo", "pwd", "cd"],
+    "stack_commands": ["npm", "npx", "node", "tsc", "eslint"],
+    "script_commands": ["npm run build", "npm test", "npm run lint"],
+    "custom_commands": ["./scripts/deploy.sh"],
+    "detected_technologies": {
+      "languages": ["TypeScript", "Python"],
+      "frameworks": ["React", "Electron"],
+      "package_managers": ["npm", "pip"],
+      "databases": [],
+      "infrastructure": []
+    }
+  }
+}
+```
+
+### State Persistence Model
+
+Auto Claude uses a **file-based state persistence** model where all state is stored in JSON files rather than in-memory:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        STATE PERSISTENCE MODEL                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  FRESH CONTEXT PRINCIPLE:                                                        │
+│  Each agent session starts with a fresh context window.                         │
+│  All state is read from files at session start.                                 │
+│  All state is written to files at session end.                                  │
+│                                                                                  │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │  SESSION N                                                                  │  │
+│  │                                                                              │  │
+│  │  1. Load State                                                               │  │
+│  │     ├── implementation_plan.json → Current subtask statuses                 │  │
+│  │     ├── context.json → Relevant files and patterns                          │  │
+│  │     ├── spec.md → Feature specification                                      │  │
+│  │     └── Graphiti → Memory context (patterns, gotchas)                       │  │
+│  │                                                                              │  │
+│  │  2. Execute Work                                                             │  │
+│  │     ├── Implement subtask(s)                                                 │  │
+│  │     ├── Run verification                                                     │  │
+│  │     └── Track discoveries                                                    │  │
+│  │                                                                              │  │
+│  │  3. Persist State                                                            │  │
+│  │     ├── implementation_plan.json ← Updated subtask status                   │  │
+│  │     ├── Git commit ← Code changes                                            │  │
+│  │     ├── build-progress.txt ← Session log                                    │  │
+│  │     └── Graphiti ← Session insights                                         │  │
+│  │                                                                              │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │  SESSION N+1 (Fresh context window)                                         │  │
+│  │                                                                              │  │
+│  │  Reads the persisted state from Session N and continues...                  │  │
+│  │                                                                              │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+│  BENEFITS:                                                                       │
+│  ✓ Crash recovery - state survives process termination                         │
+│  ✓ Resumability - can continue from any point                                  │
+│  ✓ Debuggability - all state visible in files                                  │
+│  ✓ Human intervention - users can edit state files directly                    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Memory System Data Flow
+
+Graphiti provides cross-session memory with three data types:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        MEMORY SYSTEM DATA FLOW                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │  DISCOVERY                                                                   │  │
+│  │  "Found that auth middleware uses JWT with RS256 algorithm"                 │  │
+│  │                                                                              │  │
+│  │  Stored as: Graph node with file_path, description, category                │  │
+│  │  Retrieved when: Working on related files or features                       │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │  GOTCHA                                                                      │  │
+│  │  "Don't use default exports - project convention is named exports only"     │  │
+│  │                                                                              │  │
+│  │  Stored as: Graph edge with gotcha text, context                            │  │
+│  │  Retrieved when: Semantic match to current task context                     │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+│  ┌───────────────────────────────────────────────────────────────────────────┐  │
+│  │  PATTERN                                                                     │  │
+│  │  "All API routes follow /api/v1/{resource}/{action} convention"             │  │
+│  │                                                                              │  │
+│  │  Stored as: Graph fact with pattern description                             │  │
+│  │  Retrieved when: Working on similar code structures                         │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+│  RETRIEVAL FLOW:                                                                 │
+│                                                                                  │
+│  Agent Context (spec, subtask) ──► Semantic Search ──► Top-K Memories          │
+│                                          │                                       │
+│                                          ▼                                       │
+│                                 ┌─────────────────┐                             │
+│                                 │ Memory Context  │                             │
+│                                 │ (Injected into  │                             │
+│                                 │  agent prompt)  │                             │
+│                                 └─────────────────┘                             │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### File Ownership Summary
+
+| Component | Reads | Writes |
+|-----------|-------|--------|
+| **Spec Runner** | User input, project files | requirements.json, context.json, spec.md, plan.json |
+| **Planner Agent** | spec.md, context.json | implementation_plan.json |
+| **Coder Agent** | Plan, spec, context, source | Source files, commits, plan status, progress |
+| **QA Reviewer** | Plan, spec, source files | qa_report.md, qa_signoff, QA_FIX_REQUEST.md |
+| **QA Fixer** | QA_FIX_REQUEST.md, source | Source files, commits |
+| **Frontend** | Plan JSON, progress | task_metadata.json, UI state |
+| **Graphiti** | Session context | Memory nodes/edges |
+
+---
+
+<!-- Subsequent sections (diagrams, validation, finalization) will be added in following subtasks -->

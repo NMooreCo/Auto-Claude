@@ -72,7 +72,7 @@ Build mental model of:
 ### 1.3: Identify Analysis Scope
 
 ```bash
-cat content_plan.json
+cat implementation_plan.json
 ```
 
 What needs analysis:

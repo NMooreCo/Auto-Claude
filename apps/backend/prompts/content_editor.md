@@ -292,7 +292,7 @@ If content has version tracking:
 ### 5.3: Update Progress Tracking
 
 ```bash
-# Update content_plan.json
+# Update implementation_plan.json
 # Mark editing subtask as complete
 
 # Update content-progress.md

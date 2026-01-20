@@ -29,6 +29,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 import logging
 import json
@@ -38,6 +39,9 @@ from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
+
+from core.phase_event import emit_phase, ExecutionPhase
+from task_logger import TaskLogger, LogPhase
 
 from content import (
     ContentProjectDetector,
@@ -140,8 +144,13 @@ def cmd_plan(args) -> int:
             print(f"Error: Spec directory does not exist: {spec_dir}")
             return 1
     else:
-        # Create spec directory
-        spec_dir = project_dir / ".auto-claude" / "specs" / "content-001"
+        # CLI-only fallback: create spec directory with sequential numbering
+        specs_dir = project_dir / ".auto-claude" / "specs"
+        specs_dir.mkdir(parents=True, exist_ok=True)
+        # Find next available spec number
+        existing = list(specs_dir.glob("*-*"))
+        next_num = len(existing) + 1
+        spec_dir = specs_dir / f"{next_num:03d}-content-task"
         spec_dir.mkdir(parents=True, exist_ok=True)
 
     # Save the brief
@@ -205,7 +214,8 @@ def cmd_plan(args) -> int:
         "context": plan.context,
         "summary": plan.summary,
         # Standard implementation plan fields
-        "status": "pending",
+        # Status depends on whether we're auto-executing or waiting for review
+        "status": "in_progress" if getattr(args, 'auto_approve', False) else "human_review",
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "spec_file": "spec.md",
@@ -222,6 +232,24 @@ def cmd_plan(args) -> int:
     impl_plan_path.write_text(json.dumps(plan_data, indent=2))
 
     print(f"\nPlan saved to: {impl_plan_path}")
+
+    # Check if auto-approve - chain to execution like spec_runner does
+    if getattr(args, 'auto_approve', False):
+        emit_phase(ExecutionPhase.CODING, "Starting content execution...", progress=0)
+        print(f"\nAuto-approve enabled - starting execution...")
+
+        # Chain to execution via os.execv (like spec_runner chains to run.py)
+        exec_args = [
+            sys.executable,
+            str(Path(__file__)),
+            '--project', str(project_dir),
+            '--spec', spec_dir.name,
+            '--execute'
+        ]
+        os.execv(sys.executable, exec_args)
+
+    # Manual mode - emit complete and show instructions
+    emit_phase(ExecutionPhase.COMPLETE, "Content plan ready for review", progress=100)
     print(f"\nTo execute this plan, run:")
     print(f"  python content_runner.py --project {args.project} --spec {spec_dir.name} --execute")
 
@@ -233,16 +261,21 @@ def cmd_execute(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec)
 
+    # Initialize task logger for structured log output
+    task_logger = TaskLogger(spec_dir)
+    task_logger.start_phase(LogPhase.CODING, "Starting content execution...")
+
     # Load the plan from unified implementation_plan.json
     plan_path = spec_dir / "implementation_plan.json"
     if not plan_path.exists():
-        print(f"Error: No implementation plan found at {plan_path}")
+        task_logger.log_error(f"No implementation plan found at {plan_path}")
+        task_logger.end_phase(LogPhase.CODING, success=False, message="Content execution failed - no plan found")
         return 1
 
     plan = ContentPlan.load_from_unified(plan_path)
 
-    print(f"\nExecuting content plan: {plan.project_name}")
-    print(f"Progress: {plan.get_progress()['percent_complete']}% complete")
+    task_logger.log(f"Executing content plan: {plan.project_name}")
+    task_logger.log(f"Progress: {plan.get_progress()['percent_complete']}% complete")
 
     # Create the content creator agent
     creator = ContentCreatorAgent(
@@ -258,18 +291,24 @@ def cmd_execute(args) -> int:
             break
 
         if result["status"] == "error":
-            print(f"Error: {result.get('message', 'Unknown error')}")
+            error_msg = result.get('message', 'Unknown error')
+            task_logger.log_error(f"Error: {error_msg}")
+            task_logger.end_phase(LogPhase.CODING, success=False, message="Content execution failed")
             return 1
 
         progress = result.get("progress", {})
-        print(f"  Completed: {result.get('subtask_id', 'N/A')}")
-        print(f"  Progress: {progress.get('percent_complete', 0)}%")
+        subtask_id = result.get('subtask_id', 'N/A')
+        task_logger.log(f"Completed subtask: {subtask_id}")
+        task_logger.log(f"Progress: {progress.get('percent_complete', 0)}%")
 
     # Save final plan state to unified format
     plan.save_to_unified(plan_path)
 
-    print(f"\nExecution complete!")
-    print(f"Final progress: {plan.get_progress()}")
+    # End coding phase successfully
+    task_logger.end_phase(LogPhase.CODING, success=True, message="Content creation complete")
+
+    task_logger.log_success(f"Execution complete!")
+    task_logger.log(f"Final progress: {plan.get_progress()}")
 
     return 0
 
@@ -279,10 +318,15 @@ def cmd_review(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec)
 
+    # Initialize task logger for structured log output
+    task_logger = TaskLogger(spec_dir)
+    task_logger.start_phase(LogPhase.VALIDATION, "Starting content review...")
+
     # Load the plan from unified implementation_plan.json
     plan_path = spec_dir / "implementation_plan.json"
     if not plan_path.exists():
-        print(f"Error: No implementation plan found at {plan_path}")
+        task_logger.log_error(f"No implementation plan found at {plan_path}")
+        task_logger.end_phase(LogPhase.VALIDATION, success=False, message="Review failed - no plan found")
         return 1
 
     plan = ContentPlan.load_from_unified(plan_path)
@@ -291,10 +335,10 @@ def cmd_review(args) -> int:
     content_paths = [d["path"] for d in plan.deliverables if "path" in d]
 
     if not content_paths:
-        print("Warning: No deliverables found in plan, reviewing all content files")
+        task_logger.log_info("No deliverables found in plan, reviewing all content files")
         content_paths = [str(p) for p in project_dir.rglob("*.md") if not p.name.startswith("_")]
 
-    print(f"\nReviewing {len(content_paths)} content files...")
+    task_logger.log(f"Reviewing {len(content_paths)} content files...")
 
     # Run the reviewer
     reviewer = ContentReviewerAgent(
@@ -304,12 +348,17 @@ def cmd_review(args) -> int:
 
     result = reviewer.run(content_paths, plan=plan)
 
-    print(f"\nReview complete!")
-    print(f"  Status: {result['status']}")
+    # Log review results
+    task_logger.log_success("Review complete!")
+    task_logger.log(f"Status: {result['status']}")
     if result.get('verdict'):
-        print(f"  Verdict: {result['verdict']}")
+        task_logger.log(f"Verdict: {result['verdict']}")
     if result.get('report_path'):
-        print(f"  Report: {result['report_path']}")
+        task_logger.log(f"Report: {result['report_path']}")
+
+    # End validation phase
+    review_passed = result.get('verdict', '').lower() in ['pass', 'passed', 'approved']
+    task_logger.end_phase(LogPhase.VALIDATION, success=review_passed, message="Content review complete")
 
     return 0
 
@@ -319,6 +368,11 @@ def cmd_consistency(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec) if args.spec else None
 
+    # Initialize task logger for structured log output (if spec_dir available)
+    task_logger = TaskLogger(spec_dir) if spec_dir else None
+    if task_logger:
+        task_logger.start_phase(LogPhase.VALIDATION, "Running consistency checks...")
+
     # Load plan if available from unified implementation_plan.json
     plan = None
     if spec_dir:
@@ -326,7 +380,10 @@ def cmd_consistency(args) -> int:
         if plan_path.exists():
             plan = ContentPlan.load_from_unified(plan_path)
 
-    print(f"\nRunning consistency checks...")
+    if task_logger:
+        task_logger.log("Running consistency checks...")
+    else:
+        print(f"\nRunning consistency checks...")
 
     # Run the consistency checker
     checker = ConsistencyCheckerAgent(
@@ -336,13 +393,27 @@ def cmd_consistency(args) -> int:
 
     result = checker.run(plan=plan)
 
-    print(f"\nConsistency check complete!")
-    print(f"  Status: {result['status']}")
-    print(f"  Total Issues: {result.get('total_issues', 'N/A')}")
-    if result.get('has_critical'):
-        print(f"  WARNING: Critical issues found!")
-    if result.get('report_path'):
-        print(f"  Report: {result['report_path']}")
+    # Log results
+    if task_logger:
+        task_logger.log_success("Consistency check complete!")
+        task_logger.log(f"Status: {result['status']}")
+        task_logger.log(f"Total Issues: {result.get('total_issues', 'N/A')}")
+        if result.get('has_critical'):
+            task_logger.log_error("WARNING: Critical issues found!")
+        if result.get('report_path'):
+            task_logger.log(f"Report: {result['report_path']}")
+
+        # End validation phase
+        has_critical = result.get('has_critical', False)
+        task_logger.end_phase(LogPhase.VALIDATION, success=not has_critical, message="Consistency check complete")
+    else:
+        print(f"\nConsistency check complete!")
+        print(f"  Status: {result['status']}")
+        print(f"  Total Issues: {result.get('total_issues', 'N/A')}")
+        if result.get('has_critical'):
+            print(f"  WARNING: Critical issues found!")
+        if result.get('report_path'):
+            print(f"  Report: {result['report_path']}")
 
     return 0
 
@@ -352,13 +423,24 @@ def cmd_balance(args) -> int:
     project_dir = Path(args.project).resolve()
     spec_dir = get_spec_dir(project_dir, args.spec) if args.spec else None
 
+    # Initialize task logger for structured log output (if spec_dir available)
+    task_logger = TaskLogger(spec_dir) if spec_dir else None
+    if task_logger:
+        task_logger.start_phase(LogPhase.VALIDATION, "Running balance analysis...")
+
     # Detect project type
     detector = ContentProjectDetector()
     project_type = detector.detect(str(project_dir))
 
     if project_type not in BalanceAnalystAgent.SUPPORTED_TYPES:
-        print(f"Error: Balance analysis not supported for {project_type.value}")
-        print(f"Supported types: {', '.join(t.value for t in BalanceAnalystAgent.SUPPORTED_TYPES)}")
+        error_msg = f"Balance analysis not supported for {project_type.value}"
+        if task_logger:
+            task_logger.log_error(error_msg)
+            task_logger.log(f"Supported types: {', '.join(t.value for t in BalanceAnalystAgent.SUPPORTED_TYPES)}")
+            task_logger.end_phase(LogPhase.VALIDATION, success=False, message="Balance analysis failed - unsupported project type")
+        else:
+            print(f"Error: {error_msg}")
+            print(f"Supported types: {', '.join(t.value for t in BalanceAnalystAgent.SUPPORTED_TYPES)}")
         return 1
 
     # Load plan if available from unified implementation_plan.json
@@ -368,7 +450,10 @@ def cmd_balance(args) -> int:
         if plan_path.exists():
             plan = ContentPlan.load_from_unified(plan_path)
 
-    print(f"\nRunning balance analysis...")
+    if task_logger:
+        task_logger.log("Running balance analysis...")
+    else:
+        print(f"\nRunning balance analysis...")
 
     # Run the balance analyst
     analyst = BalanceAnalystAgent(
@@ -378,15 +463,31 @@ def cmd_balance(args) -> int:
 
     result = analyst.run(plan=plan)
 
-    print(f"\nBalance analysis complete!")
-    print(f"  Status: {result['status']}")
-    if result.get('issues'):
-        print(f"  Overtuned: {result['issues'].get('overtuned', 0)}")
-        print(f"  Undertuned: {result['issues'].get('undertuned', 0)}")
-    if result.get('has_critical'):
-        print(f"  WARNING: Critical balance issues found!")
-    if result.get('report_path'):
-        print(f"  Report: {result['report_path']}")
+    # Log results
+    if task_logger:
+        task_logger.log_success("Balance analysis complete!")
+        task_logger.log(f"Status: {result['status']}")
+        if result.get('issues'):
+            task_logger.log(f"Overtuned: {result['issues'].get('overtuned', 0)}")
+            task_logger.log(f"Undertuned: {result['issues'].get('undertuned', 0)}")
+        if result.get('has_critical'):
+            task_logger.log_error("WARNING: Critical balance issues found!")
+        if result.get('report_path'):
+            task_logger.log(f"Report: {result['report_path']}")
+
+        # End validation phase
+        has_critical = result.get('has_critical', False)
+        task_logger.end_phase(LogPhase.VALIDATION, success=not has_critical, message="Balance analysis complete")
+    else:
+        print(f"\nBalance analysis complete!")
+        print(f"  Status: {result['status']}")
+        if result.get('issues'):
+            print(f"  Overtuned: {result['issues'].get('overtuned', 0)}")
+            print(f"  Undertuned: {result['issues'].get('undertuned', 0)}")
+        if result.get('has_critical'):
+            print(f"  WARNING: Critical balance issues found!")
+        if result.get('report_path'):
+            print(f"  Report: {result['report_path']}")
 
     return 0
 
@@ -481,6 +582,13 @@ def main():
         "--init",
         choices=[t.value for t in ContentProjectType if t != ContentProjectType.GENERAL],
         help="Initialize a new content project from template",
+    )
+
+    # Auto-approve flag (used by frontend to skip review and chain to execution)
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Skip human review and automatically execute the plan after creation",
     )
 
     # Parse arguments

@@ -1,5 +1,6 @@
 """Base class for Content Mode agents."""
 
+import asyncio
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Any
@@ -80,7 +81,7 @@ class ContentAgent(ABC):
             agent_type=self.AGENT_TYPE,
         )
 
-    def _create_session(self, starting_message: str, session_name: Optional[str] = None):
+    def _create_session(self, starting_message: str, session_name: Optional[str] = None) -> str:
         """
         Create an agent session with the Claude SDK.
 
@@ -89,17 +90,51 @@ class ContentAgent(ABC):
             session_name: Optional name for the session
 
         Returns:
-            The agent session response
+            The agent session response text
         """
-        client = self._get_client()
         name = session_name or f"{self.AGENT_TYPE}-session"
-
         logger.info(f"Starting {name} for project: {self.project_dir}")
 
-        return client.create_agent_session(
-            name=name,
-            starting_message=starting_message,
-        )
+        # Run the async session synchronously
+        return asyncio.run(self._run_async_session(starting_message, name))
+
+    async def _run_async_session(self, prompt: str, session_name: str) -> str:
+        """
+        Run an async agent session with the Claude SDK.
+
+        Args:
+            prompt: The prompt/message for the agent
+            session_name: Name for the session
+
+        Returns:
+            The complete response text
+        """
+        client = self._get_client()
+        response_text = ""
+
+        try:
+            async with client:
+                logger.debug(f"Sending query for {session_name}...")
+                await client.query(prompt)
+
+                async for msg in client.receive_response():
+                    msg_type = type(msg).__name__
+
+                    if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                        for block in msg.content:
+                            block_type = type(block).__name__
+                            if block_type == "TextBlock" and hasattr(block, "text"):
+                                response_text += block.text
+                                print(block.text, end="", flush=True)
+
+                print()  # Newline after response
+                logger.info(f"Session {session_name} completed successfully")
+
+        except Exception as e:
+            logger.error(f"Session {session_name} failed: {e}")
+            raise
+
+        return response_text
 
     def _build_context(self, **kwargs) -> str:
         """

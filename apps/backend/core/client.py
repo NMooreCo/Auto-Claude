@@ -56,6 +56,9 @@ def _get_cached_project_data(
     Returns:
         Tuple of (project_index, project_capabilities)
     """
+    # Handle string input
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir)
 
     key = str(project_dir.resolve())
     now = time.time()
@@ -547,6 +550,10 @@ def load_project_mcp_config(project_dir: Path) -> dict:
     Returns:
         Dict of MCP configuration values (string values, except CUSTOM_MCP_SERVERS which is parsed JSON)
     """
+    # Handle string input (callers may pass strings from CLI arguments)
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir)
+
     env_path = project_dir / ".auto-claude" / ".env"
     if not env_path.exists():
         return {}
@@ -652,6 +659,10 @@ def load_claude_md(project_dir: Path) -> str | None:
     Returns:
         Content of CLAUDE.md if found, None otherwise
     """
+    # Handle string input (callers may pass strings from CLI arguments)
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir)
+
     claude_md_path = project_dir / "CLAUDE.md"
     if claude_md_path.exists():
         try:
@@ -710,6 +721,12 @@ def create_client(
     4. Tool filtering - Each agent type only sees relevant tools (prevents misuse)
     """
     oauth_token = require_auth_token()
+
+    # Normalize Path types - callers may pass strings from CLI arguments
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir)
+    if isinstance(spec_dir, str):
+        spec_dir = Path(spec_dir)
 
     # Validate token is not encrypted before passing to SDK
     # Encrypted tokens (enc:...) should have been decrypted by require_auth_token()

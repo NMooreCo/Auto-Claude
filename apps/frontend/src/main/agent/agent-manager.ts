@@ -124,52 +124,65 @@ export class AgentManager extends EventEmitter {
       return;
     }
 
-    const specRunnerPath = path.join(autoBuildSource, 'runners', 'spec_runner.py');
+    // Check if this is a content workflow - use content_runner.py instead of spec_runner.py
+    // Content categories from shared/types/task.ts: CONTENT_CATEGORIES
+    const CONTENT_CATEGORIES = ['creative', 'game_design', 'worldbuilding', 'content_docs'];
+    const isContentWorkflow = metadata?.category && CONTENT_CATEGORIES.includes(metadata.category);
+    const runnerPath = isContentWorkflow
+      ? path.join(autoBuildSource, 'content_runner.py')
+      : path.join(autoBuildSource, 'runners', 'spec_runner.py');
 
-    if (!existsSync(specRunnerPath)) {
-      this.emit('error', taskId, `Spec runner not found at: ${specRunnerPath}`);
+    if (!existsSync(runnerPath)) {
+      this.emit('error', taskId, `Runner not found at: ${runnerPath}`);
       return;
     }
 
     // Get combined environment variables
     const combinedEnv = this.processManager.getCombinedEnv(projectPath);
 
-    // spec_runner.py will auto-start run.py after spec creation completes
-    const args = [specRunnerPath, '--task', taskDescription, '--project-dir', projectPath];
+    // Build args based on runner type
+    // content_runner.py uses --project, spec_runner.py uses --project-dir
+    const args = isContentWorkflow
+      ? [runnerPath, '--task', taskDescription, '--project', projectPath]
+      : [runnerPath, '--task', taskDescription, '--project-dir', projectPath];
 
     // Pass spec directory if provided (for UI-created tasks that already have a directory)
+    // Both runners support --spec-dir
     if (specDir) {
       args.push('--spec-dir', specDir);
     }
 
-    // Pass base branch if specified (ensures worktrees are created from the correct branch)
-    if (baseBranch) {
-      args.push('--base-branch', baseBranch);
-    }
-
-    // Check if user requires review before coding
+    // Auto-approve applies to both code and content workflows
+    // This enables automatic execution after plan creation without user intervention
     if (!metadata?.requireReviewBeforeCoding) {
-      // Auto-approve: When user starts a task from the UI without requiring review
       args.push('--auto-approve');
     }
 
-    // Pass model and thinking level configuration
-    // For auto profile, use phase-specific config; otherwise use single model/thinking
-    if (metadata?.isAutoProfile && metadata.phaseModels && metadata.phaseThinking) {
-      // Pass the spec phase model and thinking level to spec_runner
-      args.push('--model', metadata.phaseModels.spec);
-      args.push('--thinking-level', metadata.phaseThinking.spec);
-    } else if (metadata?.model) {
-      // Non-auto profile: use single model and thinking level
-      args.push('--model', metadata.model);
-      if (metadata.thinkingLevel) {
-        args.push('--thinking-level', metadata.thinkingLevel);
+    // The following options are only supported by spec_runner.py (not content_runner.py)
+    if (!isContentWorkflow) {
+      // Pass base branch if specified (ensures worktrees are created from the correct branch)
+      if (baseBranch) {
+        args.push('--base-branch', baseBranch);
       }
-    }
 
-    // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
-    if (metadata?.useWorktree === false) {
-      args.push('--direct');
+      // Pass model and thinking level configuration
+      // For auto profile, use phase-specific config; otherwise use single model/thinking
+      if (metadata?.isAutoProfile && metadata.phaseModels && metadata.phaseThinking) {
+        // Pass the spec phase model and thinking level to spec_runner
+        args.push('--model', metadata.phaseModels.spec);
+        args.push('--thinking-level', metadata.phaseThinking.spec);
+      } else if (metadata?.model) {
+        // Non-auto profile: use single model and thinking level
+        args.push('--model', metadata.model);
+        if (metadata.thinkingLevel) {
+          args.push('--thinking-level', metadata.thinkingLevel);
+        }
+      }
+
+      // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
+      if (metadata?.useWorktree === false) {
+        args.push('--direct');
+      }
     }
 
     // Store context for potential restart

@@ -51,6 +51,7 @@ export interface TaskExecutionOptions {
 }
 
 export interface SpecCreationMetadata {
+  category?: string;  // Workflow type: 'feature', 'content', 'bug', etc.
   requireReviewBeforeCoding?: boolean;
   // Auto profile - phase-based model and thinking configuration
   isAutoProfile?: boolean;

@@ -22,7 +22,7 @@ You are the **content creation agent** for content projects. Your job is to crea
 ### 1.1: Read the Content Plan
 
 ```bash
-cat content_plan.json
+cat implementation_plan.json
 ```
 
 Find your current subtask:
@@ -342,7 +342,7 @@ Before marking your subtask complete:
 
 ## PHASE 5: UPDATE PROGRESS
 
-### 5.1: Update content_plan.json
+### 5.1: Update implementation_plan.json
 
 Change your subtask status from `"pending"` to `"completed"`:
 
@@ -480,7 +480,7 @@ After completing your subtask:
 2. ✅ Template compliance verified
 3. ✅ Style guide followed
 4. ✅ Cross-references valid
-5. ✅ content_plan.json updated
+5. ✅ implementation_plan.json updated
 6. ✅ content-progress.md updated
 
 Move to the next pending subtask, or if your phase is complete, stop and let the next phase begin.
@@ -489,7 +489,7 @@ Move to the next pending subtask, or if your phase is complete, stop and let the
 
 ## BEGIN
 
-1. Read content_plan.json to find your current subtask
+1. Read implementation_plan.json to find your current subtask
 2. Gather context (templates, style guide, similar content)
 3. Create content following all conventions
 4. Verify quality

@@ -144,7 +144,7 @@ For auditing content completeness/freshness:
 
 ---
 
-## PHASE 3: CREATE content_plan.json
+## PHASE 3: CREATE implementation_plan.json
 
 **YOU MUST USE THE WRITE TOOL TO CREATE THIS FILE.**
 
@@ -422,7 +422,7 @@ Add code linkage:
 ## ENDING THIS SESSION
 
 Your session ends after creating:
-1. **content_plan.json** - The complete content creation plan
+1. **implementation_plan.json** - The complete content creation plan
 2. **content-progress.md** - Progress tracking document
 
 **STOP HERE. Do NOT:**
@@ -431,7 +431,7 @@ Your session ends after creating:
 - Update subtask statuses
 
 A SEPARATE content creator agent will:
-1. Read `content_plan.json`
+1. Read `implementation_plan.json`
 2. Find next pending subtask
 3. Create/modify content following templates
 
@@ -466,6 +466,6 @@ A SEPARATE content creator agent will:
 1. Complete PHASE 0 (Project Understanding)
 2. Read the content brief in PHASE 1
 3. Identify workflow type in PHASE 2
-4. Create content_plan.json
+4. Create implementation_plan.json
 5. Create content-progress.md
 6. **STOP** - Content Creator agent handles execution

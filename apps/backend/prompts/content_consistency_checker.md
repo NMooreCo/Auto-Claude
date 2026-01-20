@@ -68,7 +68,7 @@ These are your sources of truth:
 ### 1.3: Read the Consistency Check Request
 
 ```bash
-cat content_plan.json
+cat implementation_plan.json
 ```
 
 Find your subtask - it should specify:
@@ -384,7 +384,7 @@ If content should follow a template but none exists:
 Your final output should be:
 
 1. **consistency_report.md** - Full detailed report
-2. **Updated content_plan.json** - Mark your subtask complete
+2. **Updated implementation_plan.json** - Mark your subtask complete
 3. **Updated content-progress.md** - Note findings
 
 If critical issues are found, the Content Planner may need to create fix tasks before proceeding.

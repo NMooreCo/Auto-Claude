@@ -45,7 +45,7 @@ You are the **quality review agent** for content projects. Your job is to evalua
 ### 1.1: Read the Review Request
 
 ```bash
-cat content_plan.json
+cat implementation_plan.json
 ```
 
 Find your review subtask:
@@ -365,7 +365,7 @@ Create `review_report.md`:
 
 ### If Content Passes Review
 
-1. Update content_plan.json - mark review subtask complete
+1. Update implementation_plan.json - mark review subtask complete
 2. Note approval in review_report.md
 3. Content can proceed to finalization
 

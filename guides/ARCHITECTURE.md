@@ -22,6 +22,7 @@ This document provides a comprehensive technical overview of Auto Claude's archi
 9. [Frontend-Backend Communication](#frontend-backend-communication)
 10. [Integrations](#integrations)
 11. [Data Flow and File Structure](#data-flow-and-file-structure)
+12. [Architecture Diagrams](#architecture-diagrams)
 
 ---
 
@@ -4548,4 +4549,336 @@ Graphiti provides cross-session memory with three data types:
 
 ---
 
-<!-- Subsequent sections (diagrams, validation, finalization) will be added in following subtasks -->
+## Architecture Diagrams
+
+This section provides a consolidated reference for all architectural diagrams. These diagrams are also embedded in their relevant sections throughout this document for context.
+
+### System Component Diagram
+
+The following diagram shows the complete Auto Claude system architecture with all major components, their relationships, and the data flows between them. This is the primary reference diagram for understanding the system structure.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e1f5fe', 'primaryTextColor': '#01579b', 'primaryBorderColor': '#01579b', 'lineColor': '#455a64', 'secondaryColor': '#fff3e0', 'tertiaryColor': '#f3e5f5'}}}%%
+
+flowchart TB
+    %% ===== USER INTERFACE LAYER =====
+    subgraph UserInterface["🖥️ User Interface Layer"]
+        direction LR
+        subgraph CLIEntry["Command Line Interface"]
+            RunPy["run.py<br/>─────────────<br/>Build Execution<br/>QA Validation"]
+            SpecRunner["spec_runner.py<br/>─────────────<br/>Spec Creation<br/>Interactive Mode"]
+        end
+
+        subgraph ElectronApp["Electron Desktop Application"]
+            MainProcess["Main Process<br/>─────────────<br/>AgentManager<br/>TerminalManager<br/>IPC Handlers"]
+            Renderer["Renderer Process<br/>─────────────<br/>React + Zustand<br/>Project Management<br/>Task Visualization"]
+        end
+    end
+
+    %% ===== BACKEND ORCHESTRATION LAYER =====
+    subgraph BackendCore["⚙️ Backend Core (apps/backend/)"]
+        subgraph Orchestration["Orchestration Layer"]
+            SpecOrchestrator["SpecOrchestrator<br/>─────────────<br/>3-8 Phase Pipeline<br/>Complexity-Adaptive"]
+            AutonomousLoop["Autonomous Agent Loop<br/>─────────────<br/>Subtask Execution<br/>Recovery Management"]
+            QALoop["QA Validation Loop<br/>─────────────<br/>Review → Fix Cycle<br/>Max 50 Iterations"]
+        end
+
+        subgraph AgentLayer["Agent Layer"]
+            subgraph SpecAgents["📝 Spec Creation"]
+                Gatherer["Gatherer"]
+                Researcher["Researcher"]
+                Writer["Writer"]
+                Critic["Critic"]
+            end
+
+            subgraph ImplAgents["🔨 Implementation"]
+                Planner["Planner"]
+                Coder["Coder"]
+            end
+
+            subgraph QAAgents["✅ Quality Assurance"]
+                QAReviewer["QA Reviewer"]
+                QAFixer["QA Fixer"]
+            end
+        end
+
+        subgraph CoreServices["Core Services Layer"]
+            ClaudeClient["Claude SDK Client<br/>─────────────<br/>create_client()<br/>Security Hooks<br/>MCP Configuration"]
+            AuthSystem["Authentication<br/>─────────────<br/>OAuth Token<br/>Keychain Access"]
+            SecuritySystem["Security System<br/>─────────────<br/>3-Layer Defense<br/>Command Allowlist"]
+            WorktreeManager["Workspace Manager<br/>─────────────<br/>Git Worktrees<br/>Branch Management"]
+            ProjectAnalyzer["Project Analyzer<br/>─────────────<br/>Stack Detection<br/>Profile Generation"]
+        end
+
+        subgraph MemoryLayer["Memory & Context Layer"]
+            GraphitiMemory["Graphiti Memory<br/>─────────────<br/>Knowledge Graph<br/>Semantic Search"]
+            SessionMemory["Session Memory<br/>─────────────<br/>Patterns/Gotchas<br/>Discoveries"]
+            RecoveryManager["Recovery Manager<br/>─────────────<br/>Stuck Detection<br/>Retry Logic"]
+        end
+    end
+
+    %% ===== EXTERNAL SERVICES LAYER =====
+    subgraph ExternalServices["☁️ External Services"]
+        direction LR
+        ClaudeAPI["Claude API<br/>(via SDK)"]
+        Context7["Context7 MCP<br/>─────────────<br/>Documentation<br/>Lookup"]
+        LinearAPI["Linear API<br/>─────────────<br/>Issue Tracking<br/>(Optional)"]
+        GitHubAPI["GitHub API<br/>─────────────<br/>PR/Issues<br/>(Optional)"]
+    end
+
+    %% ===== MCP SERVERS LAYER =====
+    subgraph MCPServers["🔌 MCP Server Infrastructure"]
+        direction LR
+        AutoClaudeMCP["auto-claude MCP<br/>─────────────<br/>Build Progress<br/>Plan Updates"]
+        GraphitiMCP["graphiti MCP<br/>─────────────<br/>Memory Queries<br/>Insight Storage"]
+        ElectronMCP["electron MCP<br/>─────────────<br/>E2E Testing<br/>(QA Agents Only)"]
+        PuppeteerMCP["puppeteer MCP<br/>─────────────<br/>Browser Automation<br/>(QA Agents Only)"]
+    end
+
+    %% ===== FILE SYSTEM LAYER =====
+    subgraph FileSystem["📁 File System Artifacts"]
+        direction TB
+        subgraph SpecFiles["Spec Directory (.auto-claude/specs/XXX/)"]
+            SpecMD["spec.md"]
+            ReqJSON["requirements.json"]
+            ContextJSON["context.json"]
+            PlanJSON["implementation_plan.json"]
+            QAReport["qa_report.md"]
+            BuildProgress["build-progress.txt"]
+        end
+
+        subgraph WorktreeFiles["Worktree (.auto-claude/worktrees/tasks/XXX/)"]
+            ProjectCopy["Full Project Copy<br/>─────────────<br/>Isolated Changes<br/>Git Branch"]
+        end
+
+        SecurityCache[".auto-claude-security.json<br/>─────────────<br/>Cached Profile"]
+    end
+
+    %% ===== CONNECTIONS: User Interface to Backend =====
+    RunPy -->|"CLI args"| Orchestration
+    SpecRunner -->|"--task"| SpecOrchestrator
+    MainProcess -->|"subprocess spawn"| RunPy
+    MainProcess -->|"subprocess spawn"| SpecRunner
+    Renderer <-->|"IPC"| MainProcess
+
+    %% ===== CONNECTIONS: Orchestration to Agents =====
+    SpecOrchestrator --> SpecAgents
+    AutonomousLoop --> Planner
+    AutonomousLoop --> Coder
+    QALoop --> QAReviewer
+    QALoop --> QAFixer
+
+    %% ===== CONNECTIONS: Agents to Core Services =====
+    SpecAgents --> ClaudeClient
+    ImplAgents --> ClaudeClient
+    QAAgents --> ClaudeClient
+
+    ClaudeClient --> AuthSystem
+    ClaudeClient --> SecuritySystem
+    SecuritySystem --> ProjectAnalyzer
+
+    AutonomousLoop --> WorktreeManager
+    AutonomousLoop --> SessionMemory
+    AutonomousLoop --> RecoveryManager
+
+    %% ===== CONNECTIONS: Core Services to External =====
+    ClaudeClient -->|"API Calls"| ClaudeAPI
+    ClaudeClient -->|"MCP Protocol"| Context7
+    ClaudeClient -->|"MCP Protocol"| AutoClaudeMCP
+    ClaudeClient -->|"MCP Protocol"| GraphitiMCP
+    QAAgents -->|"MCP Protocol"| ElectronMCP
+    QAAgents -->|"MCP Protocol"| PuppeteerMCP
+
+    GraphitiMemory <--> GraphitiMCP
+    SessionMemory --> GraphitiMemory
+
+    LinearAPI -.->|"Optional"| AutonomousLoop
+    GitHubAPI -.->|"Optional"| AutonomousLoop
+
+    %% ===== CONNECTIONS: To File System =====
+    SpecOrchestrator --> SpecFiles
+    AutonomousLoop --> SpecFiles
+    AutonomousLoop --> WorktreeFiles
+    QALoop --> SpecFiles
+    WorktreeManager --> WorktreeFiles
+    ProjectAnalyzer --> SecurityCache
+
+    %% ===== STYLING =====
+    classDef userLayer fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef orchestration fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef agents fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef core fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef memory fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef external fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef mcp fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef files fill:#eceff1,stroke:#455a64,stroke-width:2px
+
+    class RunPy,SpecRunner,MainProcess,Renderer userLayer
+    class SpecOrchestrator,AutonomousLoop,QALoop orchestration
+    class Gatherer,Researcher,Writer,Critic,Planner,Coder,QAReviewer,QAFixer agents
+    class ClaudeClient,AuthSystem,SecuritySystem,WorktreeManager,ProjectAnalyzer core
+    class GraphitiMemory,SessionMemory,RecoveryManager memory
+    class ClaudeAPI,Context7,LinearAPI,GitHubAPI external
+    class AutoClaudeMCP,GraphitiMCP,ElectronMCP,PuppeteerMCP mcp
+    class SpecMD,ReqJSON,ContextJSON,PlanJSON,QAReport,BuildProgress,ProjectCopy,SecurityCache files
+```
+
+#### Component Layer Summary
+
+| Layer | Components | Responsibility |
+|-------|------------|----------------|
+| **User Interface** | CLI (run.py, spec_runner.py), Electron (Main/Renderer) | Entry points for user interaction |
+| **Orchestration** | SpecOrchestrator, AutonomousLoop, QALoop | Coordinate multi-step pipelines |
+| **Agent** | Spec Agents, Implementation Agents, QA Agents | Execute AI-powered tasks |
+| **Core Services** | Client, Auth, Security, Workspace, Analyzer | Foundational infrastructure |
+| **Memory** | Graphiti, Session Memory, Recovery | Cross-session persistence |
+| **External** | Claude API, Context7, Linear, GitHub | Third-party service integration |
+| **MCP** | auto-claude, graphiti, electron, puppeteer | Tool servers for agents |
+| **File System** | Spec files, Worktrees, Security cache | Persistent state storage |
+
+#### Key Architectural Principles Illustrated
+
+1. **Layered Dependencies** - Dependencies flow downward through layers. User interface depends on orchestration, which depends on agents, which depend on core services.
+
+2. **Agent Isolation** - Each agent type operates independently with its own tool permissions. No direct agent-to-agent communication; coordination happens through file state.
+
+3. **MCP as Extension Point** - MCP servers provide extensible tool capabilities without modifying core agent code.
+
+4. **File-Based State Transfer** - All state passes through files (spec directory artifacts), enabling crash recovery and human intervention.
+
+5. **Security at the Core** - The security system sits between agents and execution, validating all commands before they run.
+
+### System Deployment View
+
+This diagram shows how Auto Claude components map to runtime processes and their communication patterns:
+
+```mermaid
+%%{init: {'theme': 'base'}}%%
+
+C4Deployment
+    title Auto Claude Deployment Diagram
+
+    Deployment_Node(userMachine, "User Machine", "Windows/macOS/Linux") {
+
+        Deployment_Node(electronProcess, "Electron Process", "Node.js Runtime") {
+            Container(mainProcess, "Main Process", "Electron Main", "Window management, IPC, subprocess spawning")
+            Container(rendererProcess, "Renderer Process", "Chromium", "React UI, Zustand stores")
+        }
+
+        Deployment_Node(pythonProcess, "Python Process", "Python 3.12+") {
+            Container(cliApp, "CLI Application", "Python", "run.py, spec_runner.py")
+            Container(claudeSDK, "Claude Agent SDK", "Python", "Agent sessions, tool execution")
+        }
+
+        Deployment_Node(mcpProcesses, "MCP Server Processes", "Node.js/Python") {
+            Container(context7MCP, "Context7 MCP", "Node.js", "Documentation lookup")
+            Container(autoClaudeMCP, "Auto-Claude MCP", "Built-in", "Build management tools")
+        }
+
+        Deployment_Node(filesystem, "File System", "Local Storage") {
+            ContainerDb(specDir, "Spec Directory", "JSON/Markdown", "Spec artifacts, plans, reports")
+            ContainerDb(worktreeDir, "Worktree Directory", "Git Worktree", "Isolated code workspace")
+            ContainerDb(graphitiDB, "LadybugDB", "Embedded DB", "Graphiti memory storage")
+        }
+    }
+
+    Deployment_Node(cloudServices, "Cloud Services", "External APIs") {
+        Container(claudeAPI, "Claude API", "Anthropic", "LLM inference")
+        Container(linearAPI, "Linear API", "Linear", "Issue management")
+        Container(githubAPI, "GitHub API", "GitHub", "PR/Issue automation")
+    }
+
+    Rel(mainProcess, rendererProcess, "IPC", "Electron IPC")
+    Rel(mainProcess, cliApp, "spawn", "child_process")
+    Rel(cliApp, claudeSDK, "imports", "Python modules")
+    Rel(claudeSDK, context7MCP, "MCP", "stdio/HTTP")
+    Rel(claudeSDK, autoClaudeMCP, "MCP", "built-in")
+    Rel(claudeSDK, claudeAPI, "HTTPS", "API calls")
+    Rel(cliApp, specDir, "R/W", "File I/O")
+    Rel(cliApp, worktreeDir, "R/W", "Git operations")
+    Rel(claudeSDK, graphitiDB, "queries", "LadybugDB API")
+    Rel(cliApp, linearAPI, "HTTPS", "Optional")
+    Rel(cliApp, githubAPI, "HTTPS", "Optional")
+```
+
+#### Process Communication Patterns
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        RUNTIME PROCESS ARCHITECTURE                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ ELECTRON APP (Optional)                                                      ││
+│  │                                                                              ││
+│  │  ┌────────────────────┐         ┌────────────────────┐                      ││
+│  │  │  Main Process      │◄──IPC──►│  Renderer Process  │                      ││
+│  │  │  (Node.js)         │         │  (Chromium)        │                      ││
+│  │  │                    │         │                    │                      ││
+│  │  │  • AgentManager    │         │  • React App       │                      ││
+│  │  │  • TerminalManager │         │  • Zustand Stores  │                      ││
+│  │  │  • IPC Handlers    │         │  • UI Components   │                      ││
+│  │  └─────────┬──────────┘         └────────────────────┘                      ││
+│  │            │                                                                 ││
+│  │            │ child_process.spawn()                                          ││
+│  │            ▼                                                                 ││
+│  └────────────────────────────────────────────────────────────────────────────-─┘│
+│               │                                                                  │
+│  ┌────────────┼─────────────────────────────────────────────────────────────────┐│
+│  │ PYTHON BACKEND                                                               ││
+│  │            │                                                                  ││
+│  │            ▼                                                                  ││
+│  │  ┌────────────────────┐                                                      ││
+│  │  │  CLI Entry Point   │                                                      ││
+│  │  │  (run.py)          │                                                      ││
+│  │  └─────────┬──────────┘                                                      ││
+│  │            │                                                                  ││
+│  │            ▼                                                                  ││
+│  │  ┌────────────────────┐     ┌────────────────────┐                          ││
+│  │  │  Claude Agent SDK  │────►│  MCP Server        │                          ││
+│  │  │                    │     │  Processes         │                          ││
+│  │  │  • Agent Sessions  │     │                    │                          ││
+│  │  │  • Tool Execution  │     │  • context7 (npx)  │                          ││
+│  │  │  • Security Hooks  │     │  • graphiti (HTTP) │                          ││
+│  │  └─────────┬──────────┘     │  • electron (npm)  │                          ││
+│  │            │                 └────────────────────┘                          ││
+│  │            │                                                                  ││
+│  │            ▼                                                                  ││
+│  │  ┌────────────────────┐                                                      ││
+│  │  │  File System I/O   │                                                      ││
+│  │  │                    │                                                      ││
+│  │  │  .auto-claude/     │                                                      ││
+│  │  │  ├── specs/        │◄─── State persistence                               ││
+│  │  │  ├── worktrees/    │◄─── Code isolation                                  ││
+│  │  │  └── memories/     │◄─── Graphiti data                                   ││
+│  │  └────────────────────┘                                                      ││
+│  │                                                                              ││
+│  └──────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────────────────┐│
+│  │ EXTERNAL APIs (HTTPS)                                                        ││
+│  │                                                                              ││
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐             ││
+│  │  │ Claude API │  │ Linear API │  │ GitHub API │  │ Context7   │             ││
+│  │  │ (Required) │  │ (Optional) │  │ (Optional) │  │ (Built-in) │             ││
+│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘             ││
+│  │                                                                              ││
+│  └──────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Inter-Process Communication Summary
+
+| Source | Target | Protocol | Purpose |
+|--------|--------|----------|---------|
+| Renderer | Main | Electron IPC | UI actions → backend commands |
+| Main | Python CLI | child_process | Spawn agent processes |
+| Python CLI | File System | File I/O | State persistence |
+| Claude SDK | Claude API | HTTPS | AI inference |
+| Claude SDK | MCP Servers | stdio/HTTP | Tool execution |
+| Claude SDK | Graphiti | HTTP/Embedded | Memory queries |
+
+---
+
+<!-- Subsequent diagrams (Spec Creation Flow, Implementation Pipeline, Agent-Tool-MCP) will be added in following subtasks -->

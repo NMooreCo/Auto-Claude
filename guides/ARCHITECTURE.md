@@ -601,11 +601,11 @@ Each complexity tier runs a different set of phases:
 SIMPLE (4 phases):
   discovery → historical_context → quick_spec → validation
 
-STANDARD (7 phases):
-  discovery → requirements → historical_context → [research] → context → spec_writing → planning → validation
+STANDARD (7-8 phases):
+  discovery → historical_context → requirements → [research] → context → spec_writing → planning → validation
 
 COMPLEX (9 phases):
-  discovery → requirements → historical_context → research → context → spec_writing → self_critique → planning → validation
+  discovery → historical_context → requirements → research → context → spec_writing → self_critique → planning → validation
 ```
 
 #### Phase Details
@@ -652,15 +652,17 @@ flowchart TB
         QuickSpec --> SimpleValidate[Validation]
     end
 
-    subgraph StandardTier["STANDARD Workflow (7 phases)"]
-        StandardPath[Historical Context] --> StdContext[Context Phase]
+    subgraph StandardTier["STANDARD Workflow (7-8 phases)"]
+        StandardPath[Historical Context] --> StdReq[Requirements<br/>spec_gatherer.md]
+        StdReq --> StdContext[Context Phase]
         StdContext --> StdSpec[Spec Writing<br/>spec_writer.md]
         StdSpec --> StdPlan[Planning Phase<br/>planner.md]
         StdPlan --> StdValidate[Validation]
     end
 
     subgraph ComplexTier["COMPLEX Workflow (9 phases)"]
-        ComplexPath[Historical Context] --> Research[Research Phase<br/>spec_researcher.md]
+        ComplexPath[Historical Context] --> CplxReq[Requirements<br/>spec_gatherer.md]
+        CplxReq --> Research[Research Phase<br/>spec_researcher.md]
         Research --> CplxContext[Context Phase]
         CplxContext --> CplxSpec[Spec Writing<br/>spec_writer.md]
         CplxSpec --> Critique[Self-Critique<br/>spec_critic.md]
@@ -682,7 +684,7 @@ flowchart TB
     classDef decision fill:#fff3e0,stroke:#e65100
     classDef endpoint fill:#e8f5e9,stroke:#2e7d32
 
-    class Discovery,Requirements,SimplePath,StandardPath,ComplexPath,QuickSpec,StdContext,StdSpec,StdPlan,CplxContext,CplxSpec,Critique,CplxPlan,Research phase
+    class Discovery,Requirements,SimplePath,StandardPath,ComplexPath,QuickSpec,StdReq,StdContext,StdSpec,StdPlan,CplxReq,CplxContext,CplxSpec,Critique,CplxPlan,Research phase
     class ProjectIndex,ReqFile output
     class Complexity,Approved decision
     class Start,Build,Review endpoint
@@ -4931,12 +4933,13 @@ flowchart TB
     end
 
     %% ===== STANDARD TIER =====
-    ComplexityDecision -->|"STANDARD<br/>(7 phases)"| StandardStart
+    ComplexityDecision -->|"STANDARD<br/>(7-8 phases)"| StandardStart
 
     subgraph StandardTier["🟡 STANDARD Workflow"]
         direction TB
-        StandardStart["Historical Context<br/>Query Graphiti"] --> StdContext
-        StdContext["Context Analysis<br/>─────────────<br/>Identify relevant files<br/>Extract patterns"]
+        StandardStart["Historical Context<br/>Query Graphiti"] --> StdReq
+        StdReq["spec_gatherer.md Agent<br/>─────────────<br/>Collect requirements<br/>Define acceptance criteria"]
+        StdReq --> StdContext["Context Analysis<br/>─────────────<br/>Identify relevant files<br/>Extract patterns"]
         StdContext --> StdSpec["spec_writer.md Agent<br/>─────────────<br/>Create detailed spec<br/>Define technical approach"]
         StdSpec --> StdPlan["planner.md Agent<br/>─────────────<br/>Create implementation plan<br/>Define subtasks"]
         StdPlan --> StdValidate["Validation<br/>SpecValidator"]
@@ -4947,8 +4950,9 @@ flowchart TB
 
     subgraph ComplexTier["🔴 COMPLEX Workflow"]
         direction TB
-        ComplexStart["Historical Context<br/>Query Graphiti"] --> Research
-        Research["spec_researcher.md Agent<br/>─────────────<br/>Validate integrations<br/>Check API compatibility<br/>Uses Context7 MCP"]
+        ComplexStart["Historical Context<br/>Query Graphiti"] --> CplxReq
+        CplxReq["spec_gatherer.md Agent<br/>─────────────<br/>Collect requirements<br/>Define acceptance criteria"]
+        CplxReq --> Research["spec_researcher.md Agent<br/>─────────────<br/>Validate integrations<br/>Check API compatibility<br/>Uses Context7 MCP"]
         Research --> CplxContext["Context Analysis<br/>─────────────<br/>Deep file analysis<br/>Dependency mapping"]
         CplxContext --> CplxSpec["spec_writer.md Agent<br/>─────────────<br/>Comprehensive spec<br/>API contracts"]
         CplxSpec --> Critique["spec_critic.md Agent<br/>─────────────<br/>Self-review (ultrathink)<br/>Identify gaps"]
@@ -4995,8 +4999,8 @@ flowchart TB
     class Requirements requirements
     class ComplexityAssess complexity
     class SimpleStart,QuickSpec,SimpleValidate simple
-    class StandardStart,StdContext,StdSpec,StdPlan,StdValidate standard
-    class ComplexStart,Research,CplxContext,CplxSpec,Critique,CplxPlan,CplxValidate complex
+    class StandardStart,StdReq,StdContext,StdSpec,StdPlan,StdValidate standard
+    class ComplexStart,CplxReq,Research,CplxContext,CplxSpec,Critique,CplxPlan,CplxValidate complex
     class OutputFiles output
     class HumanReview,EditSpec review
     class UserTask,BuildHandoff endpoint
@@ -5007,10 +5011,9 @@ flowchart TB
 | Phase | SIMPLE | STANDARD | COMPLEX | Purpose |
 |-------|:------:|:--------:|:-------:|---------|
 | **Discovery** | ✓ | ✓ | ✓ | Project analysis, capability detection |
-| **Requirements** | ✓ | ✓ | ✓ | Task collection, acceptance criteria |
-| **Complexity Assessment** | ✓ | ✓ | ✓ | Route to appropriate workflow |
 | **Historical Context** | ✓ | ✓ | ✓ | Query Graphiti for past patterns |
-| **Research** | — | — | ✓ | Validate external integrations |
+| **Requirements** | — | ✓ | ✓ | Task collection, acceptance criteria |
+| **Research** | — | opt | ✓ | Validate external integrations |
 | **Context Analysis** | — | ✓ | ✓ | Identify relevant files and patterns |
 | **Spec Writing** | — | ✓ | ✓ | Create detailed specification |
 | **Self-Critique** | — | — | ✓ | Review spec with extended thinking |

@@ -3320,4 +3320,701 @@ export interface TaskAPI {
 
 ---
 
+## Integrations
+
+Auto Claude integrates with multiple external systems to enhance its capabilities. These integrations are designed to be **optional** - if not configured, the system gracefully falls back to local-only operation.
+
+### Integration Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        INTEGRATION ARCHITECTURE                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                         AUTO CLAUDE CORE                                  │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│          │            │            │            │            │                   │
+│          ▼            ▼            ▼            ▼            ▼                   │
+│  ┌─────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐           │
+│  │  Graphiti   │ │ Linear  │ │ GitHub  │ │   MCP   │ │  Context7   │           │
+│  │   Memory    │ │  Issue  │ │  PR/    │ │ Servers │ │    Docs     │           │
+│  │   System    │ │ Tracking│ │ Issues  │ │         │ │   Lookup    │           │
+│  └─────────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────────┘           │
+│        │              │           │           │              │                   │
+│        ▼              ▼           ▼           ▼              ▼                   │
+│  ┌─────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐           │
+│  │ LadybugDB   │ │ Linear  │ │ GitHub  │ │Various  │ │ Context7    │           │
+│  │ (embedded)  │ │   API   │ │   API   │ │Services │ │   Server    │           │
+│  └─────────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────────┘           │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Integration | Purpose | Required | Configuration |
+|-------------|---------|----------|---------------|
+| **Graphiti** | Cross-session memory, knowledge graph | No | `GRAPHITI_ENABLED=true` |
+| **Linear** | Project management, issue tracking | No | `LINEAR_API_KEY` |
+| **GitHub** | PR review, issue triage, auto-fix | No | `gh` CLI authenticated |
+| **MCP Servers** | Extended agent capabilities | Partial | Per-agent configuration |
+| **Context7** | Documentation lookup | No | Auto-configured |
+
+---
+
+### Graphiti Memory System
+
+**Graphiti** provides persistent, cross-session memory using a knowledge graph architecture. It enables agents to learn from past sessions, remember codebase patterns, and avoid repeating mistakes.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        GRAPHITI MEMORY ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                      GraphitiMemory (Facade)                             │    │
+│  │  integrations/graphiti/memory.py                                         │    │
+│  │  - High-level API for memory operations                                  │    │
+│  │  - Async interface with error handling                                   │    │
+│  │  - Graceful fallback when unavailable                                   │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│          │                │                │                │                    │
+│          ▼                ▼                ▼                ▼                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │   Client    │  │   Queries   │  │   Search    │  │   Schema    │            │
+│  │  (queries_  │  │  (queries_  │  │  (queries_  │  │  (queries_  │            │
+│  │  pkg/)      │  │  pkg/)      │  │  pkg/)      │  │  pkg/)      │            │
+│  │             │  │             │  │             │  │             │            │
+│  │ Database    │  │ Episode     │  │ Semantic    │  │ Episode     │            │
+│  │ connection  │  │ storage     │  │ retrieval   │  │ types       │            │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘            │
+│          │                                                                       │
+│          ▼                                                                       │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                      LadybugDB (Embedded Graph DB)                        │    │
+│  │  - No Docker required (pure Python)                                       │    │
+│  │  - Requires Python 3.12+                                                  │    │
+│  │  - Data stored in ~/.auto-claude/memories/                               │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Modules
+
+| Module | Location | Purpose |
+|--------|----------|---------|
+| `memory.py` | `integrations/graphiti/` | Facade - public API and backward compatibility |
+| `graphiti.py` | `integrations/graphiti/queries_pkg/` | Main GraphitiMemory class |
+| `client.py` | `integrations/graphiti/queries_pkg/` | LadybugDB client wrapper |
+| `queries.py` | `integrations/graphiti/queries_pkg/` | Episode storage operations |
+| `search.py` | `integrations/graphiti/queries_pkg/` | Semantic search logic |
+| `schema.py` | `integrations/graphiti/queries_pkg/` | Data structures and constants |
+| `config.py` | `integrations/graphiti/` | Configuration and provider validation |
+| `providers.py` | `integrations/graphiti/` | Multi-provider factory |
+
+#### Memory Scoping
+
+Graphiti supports two memory scoping modes:
+
+| Mode | Scope | Use Case |
+|------|-------|----------|
+| **PROJECT** (default) | All specs share memory | Cross-spec learning, project-wide patterns |
+| **SPEC** | Each spec isolated | Independent task memory, experimentation |
+
+```python
+# integrations/graphiti/queries_pkg/graphiti.py
+class GraphitiMemory:
+    @property
+    def group_id(self) -> str:
+        """
+        - PROJECT mode: project_name + path_hash (e.g., "project_myapp_a1b2c3d4")
+        - SPEC mode: spec folder name (e.g., "001-add-auth")
+        """
+```
+
+#### Episode Types
+
+Memory is stored as "episodes" with different types:
+
+| Episode Type | Purpose | Example |
+|--------------|---------|---------|
+| `session_insight` | Learnings from a coding session | "React hooks need cleanup functions" |
+| `codebase_discovery` | File purposes and structure | "auth.py handles JWT validation" |
+| `pattern` | Recurring code patterns | "All API routes use decorator @api_route" |
+| `gotcha` | Pitfalls to avoid | "Don't use sync I/O in async handlers" |
+| `task_outcome` | Task success/failure records | "Task 001: Added auth - Success" |
+| `qa_result` | QA findings | "Test coverage dropped below 80%" |
+| `historical_context` | Graph-derived hints for specs | "Related issue #123 was fixed similarly" |
+
+#### Multi-Provider Support
+
+Graphiti supports multiple LLM and embedding providers:
+
+**LLM Providers:**
+| Provider | Environment Variable | Default Model |
+|----------|---------------------|---------------|
+| OpenAI | `OPENAI_API_KEY` | `gpt-5-mini` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` | (deployment-specific) |
+| Google AI | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
+| Ollama | `OLLAMA_BASE_URL` | (model-specific) |
+| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4` |
+
+**Embedder Providers:**
+| Provider | Environment Variable | Dimension |
+|----------|---------------------|-----------|
+| OpenAI | `OPENAI_API_KEY` | 1536 |
+| Voyage AI | `VOYAGE_API_KEY` | 1024 |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` | 1536 |
+| Google AI | `GOOGLE_API_KEY` | 768 |
+| Ollama | `OLLAMA_EMBEDDING_MODEL` | (auto-detected) |
+
+**Common Combinations:**
+```bash
+# Anthropic LLM + Voyage embeddings (recommended for Claude users)
+GRAPHITI_ENABLED=true
+GRAPHITI_LLM_PROVIDER=anthropic
+GRAPHITI_EMBEDDER_PROVIDER=voyage
+ANTHROPIC_API_KEY=...
+VOYAGE_API_KEY=...
+
+# Fully local with Ollama
+GRAPHITI_ENABLED=true
+GRAPHITI_LLM_PROVIDER=ollama
+GRAPHITI_EMBEDDER_PROVIDER=ollama
+OLLAMA_LLM_MODEL=deepseek-r1:7b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
+
+#### Usage in Agents
+
+Agents interact with Graphiti memory through the memory manager:
+
+```python
+# agents/memory_manager.py
+from integrations.graphiti.memory import get_graphiti_memory
+
+# Get memory instance
+memory = get_graphiti_memory(spec_dir, project_dir)
+
+# Retrieve context for a new session
+context = await memory.get_context_for_session("Implementing user authentication")
+# Returns: relevant patterns, gotchas, past insights
+
+# Store a discovery
+await memory.add_codebase_discovery(
+    file_path="src/auth/jwt.py",
+    description="Handles JWT token generation and validation",
+    patterns=["Uses RS256 algorithm", "Tokens expire in 24h"]
+)
+
+# Record a gotcha
+await memory.add_gotcha(
+    gotcha="Always check token expiry before validation",
+    context="JWT validation in auth middleware"
+)
+```
+
+#### Data Flow
+
+```
+Session Start
+    │
+    ├── memory.get_context_for_session(task_description)
+    │   ├── Semantic search for relevant episodes
+    │   ├── Retrieve patterns, gotchas, discoveries
+    │   └── Return formatted context for agent prompt
+    │
+Session Execution
+    │
+    ├── Agent uses MCP tools: mcp__graphiti-memory__*
+    │   ├── record_discovery → Add codebase insight
+    │   ├── record_gotcha → Add pitfall to avoid
+    │   └── get_session_context → Query memory mid-session
+    │
+Session End
+    │
+    └── memory.save_session_insights(...)
+        ├── Extract patterns from session
+        ├── Store task outcome
+        └── Update knowledge graph
+```
+
+---
+
+### Linear Integration
+
+**Linear** provides project management integration, allowing Auto Claude to track subtask progress as Linear issues.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         LINEAR INTEGRATION                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                      LinearManager                                        │    │
+│  │  integrations/linear/integration.py                                       │    │
+│  │  - Subtask → Issue mapping                                               │    │
+│  │  - Session result recording                                              │    │
+│  │  - Progress tracking                                                     │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                     │                                            │
+│                                     ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                      Linear MCP Server                                    │    │
+│  │  mcp.linear.app (HTTP)                                                   │    │
+│  │  - create_project, create_issue, update_issue                           │    │
+│  │  - create_comment, list_teams, search_issues                            │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Configuration
+
+Linear integration requires a single environment variable:
+
+```bash
+# apps/backend/.env
+LINEAR_API_KEY=lin_api_xxxxx
+```
+
+#### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Project Creation** | Creates a Linear project for each spec |
+| **Issue Sync** | Maps each subtask to a Linear issue |
+| **Status Updates** | Syncs subtask status (pending → in_progress → completed) |
+| **Session Comments** | Records session results as issue comments |
+| **Stuck Escalation** | Moves stuck subtasks to "Blocked" with detailed comments |
+| **META Issue** | Creates a tracking issue for overall progress |
+
+#### State Management
+
+Linear integration state is persisted in `.linear_project.json`:
+
+```json
+{
+  "initialized": true,
+  "team_id": "TEAM-123",
+  "project_id": "PROJ-456",
+  "project_name": "001-add-auth",
+  "meta_issue_id": "LIN-789",
+  "issue_mapping": {
+    "subtask-1-1": "LIN-100",
+    "subtask-1-2": "LIN-101",
+    "subtask-2-1": "LIN-102"
+  },
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+#### Workflow
+
+```
+Planner Session
+    │
+    ├── LinearManager.initialize_project()
+    │   ├── Create Linear project via MCP
+    │   ├── Create issues for each subtask
+    │   └── Create META tracking issue
+    │
+Coder Session
+    │
+    ├── Start: Update issue status to "In Progress"
+    ├── Progress: Add comments with blockers/updates
+    └── Complete: Update status to "Done"
+    │
+Stuck Subtask
+    │
+    └── Escalate: Status → "Blocked", add diagnostic comments
+```
+
+#### MCP Tools Available
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__linear-server__list_teams` | List available teams |
+| `mcp__linear-server__create_project` | Create a new project |
+| `mcp__linear-server__create_issue` | Create an issue |
+| `mcp__linear-server__update_issue` | Update issue status |
+| `mcp__linear-server__create_comment` | Add comment to issue |
+| `mcp__linear-server__search_issues` | Search existing issues |
+
+---
+
+### GitHub Integration
+
+**GitHub** integration provides AI-powered automation for PRs and issues:
+
+- **PR Review**: Multi-pass code review with inline comments
+- **Issue Triage**: Classification, labeling, duplicate detection
+- **Issue Auto-Fix**: Automatic spec creation and execution for issues
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         GITHUB INTEGRATION                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                     GitHubOrchestrator                                    │    │
+│  │  runners/github/orchestrator.py                                          │    │
+│  │  - Coordinates all GitHub workflows                                      │    │
+│  │  - Delegates to specialized service engines                              │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│          │                │                │                │                    │
+│          ▼                ▼                ▼                ▼                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │ PRReview    │  │  Triage     │  │  AutoFix    │  │   Batch     │            │
+│  │   Engine    │  │   Engine    │  │  Processor  │  │  Processor  │            │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘            │
+│        │                │                │                                       │
+│        ▼                ▼                ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                        GHClient                                           │    │
+│  │  runners/github/gh_client.py                                             │    │
+│  │  - Wrapper around `gh` CLI                                               │    │
+│  │  - Handles authentication and rate limiting                              │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Service Engines
+
+| Engine | Location | Purpose |
+|--------|----------|---------|
+| `PRReviewEngine` | `services/pr_review_engine.py` | Multi-pass code review |
+| `TriageEngine` | `services/triage_engine.py` | Issue classification |
+| `AutoFixProcessor` | `services/autofix_processor.py` | Automatic issue fixing |
+| `BatchProcessor` | `services/batch_processor.py` | Batch issue processing |
+| `PRWorktreeManager` | `services/pr_worktree_manager.py` | Isolated PR checkout |
+
+#### PR Review Workflow
+
+```
+PR Review
+    │
+    ├── 1. Context Gathering (PRContextGatherer)
+    │   ├── Fetch PR metadata and diff
+    │   ├── Identify changed files
+    │   └── Load relevant project context
+    │
+    ├── 2. Code Analysis (PRReviewEngine)
+    │   ├── Structural analysis (imports, exports)
+    │   ├── Security scan
+    │   ├── Style and pattern check
+    │   └── Logic and correctness review
+    │
+    ├── 3. Finding Generation
+    │   ├── Categorize: bug, security, performance, style
+    │   ├── Severity: critical, major, minor, suggestion
+    │   └── Generate inline comments
+    │
+    └── 4. Output
+        ├── Post review comments via gh CLI
+        ├── Optionally approve/request changes
+        └── Generate summary comment
+```
+
+**Review Categories:**
+
+| Category | Description | Severity Range |
+|----------|-------------|----------------|
+| `security` | Security vulnerabilities | Critical - Major |
+| `bug` | Logic errors, crashes | Critical - Minor |
+| `performance` | Performance issues | Major - Minor |
+| `style` | Code style violations | Minor - Suggestion |
+| `architecture` | Design concerns | Major - Suggestion |
+
+#### Issue Triage Workflow
+
+```
+Issue Triage
+    │
+    ├── 1. Issue Analysis (TriageEngine)
+    │   ├── Parse issue title and body
+    │   ├── Check for duplicates
+    │   └── Detect spam/bot content
+    │
+    ├── 2. Classification
+    │   ├── Category: bug, feature, question, docs
+    │   ├── Priority: urgent, high, medium, low
+    │   └── Labels: suggested labels
+    │
+    └── 3. Output
+        ├── Add suggested labels
+        ├── Add triage comment
+        └── Optionally close duplicates
+```
+
+**Triage Categories:**
+
+| Category | Description |
+|----------|-------------|
+| `bug` | Something broken |
+| `feature` | New functionality request |
+| `enhancement` | Improvement to existing |
+| `question` | User needs help |
+| `docs` | Documentation issue |
+| `duplicate` | Already exists |
+| `spam` | Not legitimate |
+
+#### Auto-Fix Workflow
+
+```
+Auto-Fix Issue
+    │
+    ├── 1. Issue Analysis (AutoFixProcessor)
+    │   ├── Parse issue for requirements
+    │   ├── Check if auto-fixable
+    │   └── Estimate complexity
+    │
+    ├── 2. Spec Creation
+    │   ├── Generate spec from issue
+    │   ├── Create implementation plan
+    │   └── Setup worktree
+    │
+    ├── 3. Implementation
+    │   ├── Run coder agent
+    │   ├── Run QA validation
+    │   └── Commit changes
+    │
+    └── 4. PR Creation
+        ├── Push branch
+        ├── Create PR referencing issue
+        └── Request review
+```
+
+#### Supporting Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `GHClient` | `gh_client.py` | GitHub CLI wrapper |
+| `BotDetector` | `bot_detection.py` | Filter automated issues |
+| `RateLimiter` | `rate_limiter.py` | Prevent API rate limits |
+| `PermissionChecker` | `permissions.py` | Verify repo permissions |
+| `ContextGatherer` | `context_gatherer.py` | Collect PR context |
+| `PromptManager` | `services/prompt_manager.py` | Load review prompts |
+
+#### Configuration
+
+GitHub integration uses the `gh` CLI for authentication:
+
+```bash
+# Authenticate gh CLI
+gh auth login
+
+# Verify authentication
+gh auth status
+```
+
+No additional environment variables required - authentication is handled by `gh` CLI.
+
+---
+
+### MCP Server Integration
+
+**MCP (Model Context Protocol)** servers extend agent capabilities with specialized tools.
+
+#### Built-in MCP Servers
+
+| Server | ID | Type | Purpose |
+|--------|-----|------|---------|
+| **Context7** | `context7` | Command | Documentation lookup |
+| **Linear** | `linear` | HTTP | Project management |
+| **Graphiti** | `graphiti` | HTTP | Memory system |
+| **Electron** | `electron` | Command | Desktop app automation |
+| **Puppeteer** | `puppeteer` | Command | Web browser automation |
+| **Auto-Claude** | `auto-claude` | Custom | Build management |
+
+#### Server Configuration
+
+```python
+# core/client.py - MCP server definitions
+MCP_SERVERS = {
+    "context7": {
+        "type": "command",
+        "command": "npx",
+        "args": ["@upstash/context7-mcp"],
+    },
+    "linear": {
+        "type": "http",
+        "url": "https://mcp.linear.app/sse",
+        "headers": {"Authorization": f"Bearer {LINEAR_API_KEY}"},
+    },
+    "graphiti": {
+        "type": "http",
+        "url": GRAPHITI_MCP_URL,  # From env
+    },
+    "electron": {
+        "type": "command",
+        "command": "npm",
+        "args": ["exec", "electron-mcp-server"],
+    },
+    "puppeteer": {
+        "type": "command",
+        "command": "npx",
+        "args": ["puppeteer-mcp-server"],
+    },
+}
+```
+
+#### Phase-Aware Server Allocation
+
+Different agent types get different MCP servers based on their needs:
+
+| Agent Type | MCP Servers |
+|------------|-------------|
+| `spec_gatherer` | (none) |
+| `spec_researcher` | context7 |
+| `spec_writer` | (none) |
+| `planner` | context7, graphiti, auto-claude |
+| `coder` | context7, graphiti, auto-claude |
+| `qa_reviewer` | context7, graphiti, auto-claude, browser* |
+| `qa_fixer` | context7, graphiti, auto-claude, browser* |
+
+*Browser = electron (for Electron apps) or puppeteer (for web apps)
+
+#### Auto-Claude MCP Tools
+
+The `auto-claude` MCP server provides custom tools for build management:
+
+| Tool | Purpose |
+|------|---------|
+| `get_build_progress` | Get subtask completion status |
+| `update_subtask_status` | Mark subtask complete/failed |
+| `record_discovery` | Save codebase insight to memory |
+| `record_gotcha` | Save pitfall to memory |
+| `get_session_context` | Retrieve memory context |
+| `update_qa_status` | Update QA signoff status |
+
+#### Custom MCP Server Support
+
+Projects can add custom MCP servers via `.auto-claude/.env`:
+
+```bash
+# .auto-claude/.env
+CUSTOM_MCP_SERVERS='[
+  {
+    "id": "my-docs",
+    "name": "Custom Docs Server",
+    "type": "http",
+    "url": "http://localhost:3000/mcp"
+  },
+  {
+    "id": "my-tool",
+    "name": "Custom Tool",
+    "type": "command",
+    "command": "npx",
+    "args": ["my-mcp-tool"]
+  }
+]'
+
+# Enable for specific agents
+AGENT_MCP_coder_ADD=my-docs,my-tool
+AGENT_MCP_qa_reviewer_ADD=my-docs
+```
+
+**Security Validation:**
+
+Custom MCP servers are validated before use:
+
+- **Command type**: Only safe commands (`npx`, `npm`, `node`, `python`, `uv`)
+- **Dangerous commands blocked**: `bash`, `sh`, `cmd`, `powershell`
+- **Dangerous flags blocked**: `--eval`, `-c`, `-e`, `-m`
+- **HTTP type**: URL must be valid
+
+---
+
+### Integration Data Flow Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        INTEGRATION DATA FLOWS                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  SESSION START                                                                   │
+│  ├── Graphiti: Load context, patterns, gotchas from memory                      │
+│  ├── Linear: Load subtask-to-issue mappings                                     │
+│  └── MCP: Initialize configured servers                                         │
+│                                                                                  │
+│  DURING SESSION                                                                  │
+│  ├── Context7: Query documentation on-demand                                    │
+│  ├── Graphiti: Record discoveries, query patterns                               │
+│  ├── Linear: Update issue status, add comments                                  │
+│  └── Browser: Interact with app for testing (QA only)                          │
+│                                                                                  │
+│  SESSION END                                                                     │
+│  ├── Graphiti: Save session insights, outcomes                                  │
+│  ├── Linear: Final status update, session summary comment                       │
+│  └── Auto-Claude: Update plan status, mark subtask complete                     │
+│                                                                                  │
+│  GITHUB WORKFLOWS (Separate)                                                     │
+│  ├── PR Review: Analyze diff → Post comments → Update status                   │
+│  ├── Issue Triage: Classify → Label → Detect duplicates                        │
+│  └── Auto-Fix: Create spec → Run build → Create PR                             │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Configuration Reference
+
+#### Environment Variables Summary
+
+| Variable | Integration | Purpose |
+|----------|-------------|---------|
+| `GRAPHITI_ENABLED` | Graphiti | Enable memory system |
+| `GRAPHITI_LLM_PROVIDER` | Graphiti | LLM for memory ops |
+| `GRAPHITI_EMBEDDER_PROVIDER` | Graphiti | Embedder for semantic search |
+| `OPENAI_API_KEY` | Graphiti | OpenAI provider |
+| `ANTHROPIC_API_KEY` | Graphiti | Anthropic provider |
+| `VOYAGE_API_KEY` | Graphiti | Voyage embedder |
+| `GOOGLE_API_KEY` | Graphiti | Google AI provider |
+| `OLLAMA_BASE_URL` | Graphiti | Local Ollama server |
+| `LINEAR_API_KEY` | Linear | Linear API access |
+| `ELECTRON_MCP_ENABLED` | MCP | Enable Electron tools |
+| `ELECTRON_DEBUG_PORT` | MCP | Electron CDP port (default: 9222) |
+| `CUSTOM_MCP_SERVERS` | MCP | Custom server definitions |
+
+#### Quick Setup
+
+**Minimal (Local-only):**
+```bash
+# No integrations - works offline
+# All features work, just no cross-session memory or project tracking
+```
+
+**With Memory:**
+```bash
+# apps/backend/.env
+GRAPHITI_ENABLED=true
+GRAPHITI_LLM_PROVIDER=openai
+GRAPHITI_EMBEDDER_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+**Full Integration:**
+```bash
+# apps/backend/.env
+GRAPHITI_ENABLED=true
+GRAPHITI_LLM_PROVIDER=anthropic
+GRAPHITI_EMBEDDER_PROVIDER=voyage
+ANTHROPIC_API_KEY=...
+VOYAGE_API_KEY=...
+LINEAR_API_KEY=lin_api_...
+ELECTRON_MCP_ENABLED=true
+```
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

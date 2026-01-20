@@ -1381,4 +1381,434 @@ The pipeline provides several points for human intervention:
 
 ---
 
+## Agent System
+
+The Agent System is the heart of Auto Claude's AI capabilities. It defines how AI agents interact with the codebase through a carefully controlled set of tools and external services. This section covers the agent types, tool permissions, MCP server integration, and how the Claude Agent SDK ties everything together.
+
+### Agent System Overview
+
+Auto Claude uses the **Claude Agent SDK** (`claude-agent-sdk` package) for all AI interactions. The SDK provides:
+
+- **Session Management** - Each agent runs in a controlled session with defined capabilities
+- **Tool Permissions** - Fine-grained control over which tools each agent can use
+- **MCP Integration** - Model Context Protocol servers for external service access
+- **Security Hooks** - Pre-tool-use validation for dangerous operations
+- **Extended Thinking** - Configurable token budgets for complex reasoning
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AGENT SYSTEM ARCHITECTURE                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐       │
+│  │  Agent Type     │     │  AGENT_CONFIGS  │     │  Claude SDK     │       │
+│  │  (e.g., coder)  │────►│  (Single Source │────►│  Client         │       │
+│  │                 │     │   of Truth)     │     │                 │       │
+│  └─────────────────┘     └─────────────────┘     └─────────────────┘       │
+│                                   │                       │                 │
+│                                   ▼                       ▼                 │
+│                    ┌──────────────────────────────────────────────┐        │
+│                    │              Configuration                    │        │
+│                    ├──────────────────────────────────────────────┤        │
+│                    │  • allowed_tools: [Read, Write, Bash, ...]   │        │
+│                    │  • mcp_servers: [context7, graphiti, ...]    │        │
+│                    │  • auto_claude_tools: [update_subtask, ...]  │        │
+│                    │  • thinking_default: "high" / "medium" / ... │        │
+│                    └──────────────────────────────────────────────┘        │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Agent Types
+
+Auto Claude defines multiple agent types, each optimized for specific tasks. All agent configurations are defined in `AGENT_CONFIGS` (`agents/tools_pkg/models.py`), the single source of truth for agent capabilities.
+
+#### Agent Categories
+
+| Category | Agents | Purpose |
+|----------|--------|---------|
+| **Spec Creation** | `spec_gatherer`, `spec_researcher`, `spec_writer`, `spec_critic`, `spec_discovery`, `spec_context`, `spec_validation`, `spec_compaction` | Create and validate specifications |
+| **Build** | `planner`, `coder` | Plan and implement features |
+| **QA** | `qa_reviewer`, `qa_fixer` | Validate and fix implementations |
+| **Utility** | `insights`, `merge_resolver`, `commit_message` | Supporting tasks |
+| **Analysis** | `analysis`, `batch_analysis`, `batch_validation` | Code analysis |
+| **PR/GitHub** | `pr_reviewer`, `pr_orchestrator_parallel`, `pr_followup_parallel` | PR review workflows |
+| **Product** | `roadmap_discovery`, `competitor_analysis`, `ideation` | Product planning |
+
+#### Agent Configuration Structure
+
+Each agent in `AGENT_CONFIGS` has these properties:
+
+```python
+AGENT_CONFIGS = {
+    "agent_type": {
+        "tools": [...],              # Built-in tools this agent can use
+        "mcp_servers": [...],        # Required MCP servers to start
+        "mcp_servers_optional": [...], # Conditional servers (e.g., Linear if enabled)
+        "auto_claude_tools": [...],  # Custom Auto-Claude MCP tools
+        "thinking_default": "...",   # Extended thinking level (none/low/medium/high/ultrathink)
+    }
+}
+```
+
+#### Key Agent Configurations
+
+| Agent | Tools | MCP Servers | Thinking | Purpose |
+|-------|-------|-------------|----------|---------|
+| **spec_gatherer** | Read + Web | — | medium | Collect user requirements |
+| **spec_researcher** | Read + Web | context7 | medium | Validate external integrations |
+| **spec_writer** | Read + Write | — | high | Create spec.md |
+| **spec_critic** | Read only | — | ultrathink | Self-critique with extended thinking |
+| **planner** | Read + Write + Web | context7, graphiti, auto-claude | high | Create implementation plans |
+| **coder** | Read + Write + Web | context7, graphiti, auto-claude | none | Implement subtasks |
+| **qa_reviewer** | Read + Write + Web | context7, graphiti, auto-claude, browser | high | Validate implementations |
+| **qa_fixer** | Read + Write + Web | context7, graphiti, auto-claude, browser | medium | Fix QA issues |
+
+### Tool System
+
+Tools are the actions agents can perform. Auto Claude organizes tools into categories with different access levels.
+
+#### Tool Categories
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              TOOL HIERARCHY                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  BASE TOOLS (Built-in Claude Code tools)                               │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │  Read Tools:  Read, Glob, Grep                                        │  │
+│  │  Write Tools: Write, Edit, Bash                                       │  │
+│  │  Web Tools:   WebFetch, WebSearch                                     │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  MCP TOOLS (External service integrations)                             │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │  Context7:  resolve-library-id, get-library-docs                      │  │
+│  │  Linear:    list_issues, create_issue, update_issue, ...              │  │
+│  │  Graphiti:  search_nodes, search_facts, add_episode, ...              │  │
+│  │  Browser:   screenshot, click, fill, evaluate (Electron/Puppeteer)    │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  AUTO-CLAUDE TOOLS (Custom build management)                           │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │  update_subtask_status, get_build_progress, record_discovery,         │  │
+│  │  record_gotcha, get_session_context, update_qa_status                 │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Base Tools
+
+Built-in Claude Code tools for file operations and web access:
+
+| Tool | Category | Description |
+|------|----------|-------------|
+| `Read` | Read | Read file contents |
+| `Glob` | Read | Find files by pattern |
+| `Grep` | Read | Search file contents with regex |
+| `Write` | Write | Create or overwrite files |
+| `Edit` | Write | Make targeted edits to files |
+| `Bash` | Write | Execute shell commands (validated by security hooks) |
+| `WebFetch` | Web | Fetch and process web page content |
+| `WebSearch` | Web | Search the web for information |
+
+#### Auto-Claude Custom Tools
+
+Custom MCP tools for build management, exposed via the `auto-claude` MCP server:
+
+| Tool | Used By | Description |
+|------|---------|-------------|
+| `update_subtask_status` | Coder, QA Fixer | Update subtask status in implementation_plan.json |
+| `get_build_progress` | All build agents | Get current build progress and next subtask |
+| `record_discovery` | Planner, Coder | Record codebase discoveries to session memory |
+| `record_gotcha` | Coder, QA Fixer | Record gotchas/pitfalls for future sessions |
+| `get_session_context` | All build agents | Retrieve context from previous sessions |
+| `update_qa_status` | QA Reviewer, QA Fixer | Update QA signoff status in plan |
+
+### MCP Server Integration
+
+Model Context Protocol (MCP) servers provide agents with access to external services and specialized capabilities.
+
+#### Available MCP Servers
+
+| Server | Type | Purpose | Agents |
+|--------|------|---------|--------|
+| **context7** | Command | Documentation lookup via `@upstash/context7-mcp` | Researchers, Planners, Coders, QA |
+| **graphiti** | HTTP | Knowledge graph memory for cross-session learning | Planners, Coders, QA |
+| **linear** | HTTP | Project management integration (optional) | Build and QA agents |
+| **electron** | Command | Desktop app automation via Chrome DevTools Protocol | QA agents (Electron projects) |
+| **puppeteer** | Command | Web browser automation for UI testing | QA agents (Web projects) |
+| **auto-claude** | Command | Custom build management tools | Build and QA agents |
+
+#### MCP Server Configuration
+
+MCP servers are configured in the Claude SDK client options:
+
+```python
+# core/client.py - MCP server configuration
+mcp_servers = {
+    "context7": {
+        "command": "npx",
+        "args": ["-y", "@upstash/context7-mcp"],
+    },
+    "graphiti-memory": {
+        "type": "http",
+        "url": "http://localhost:8000/mcp/",  # GRAPHITI_MCP_URL
+    },
+    "linear": {
+        "type": "http",
+        "url": "https://mcp.linear.app/mcp",
+        "headers": {"Authorization": f"Bearer {linear_api_key}"},
+    },
+    "electron": {
+        "command": "npm",
+        "args": ["exec", "electron-mcp-server"],
+    },
+    "puppeteer": {
+        "command": "npx",
+        "args": ["puppeteer-mcp-server"],
+    },
+}
+```
+
+#### Dynamic Server Selection
+
+MCP servers are started dynamically based on:
+
+1. **Agent Type** - Each agent only gets servers it needs (from `AGENT_CONFIGS`)
+2. **Project Capabilities** - Browser tools depend on project type (Electron vs web)
+3. **Integration Status** - Linear only if `LINEAR_API_KEY` is set and project enables it
+4. **Per-Project Config** - `.auto-claude/.env` can enable/disable servers
+
+```python
+# agents/tools_pkg/models.py - Dynamic server selection
+def get_required_mcp_servers(
+    agent_type: str,
+    project_capabilities: dict | None = None,
+    linear_enabled: bool = False,
+    mcp_config: dict | None = None,
+) -> list[str]:
+    """
+    Get MCP servers required for this agent type.
+
+    Handles dynamic server selection:
+    - "browser" → electron (if is_electron) or puppeteer (if is_web_frontend)
+    - "linear" → only if in mcp_servers_optional AND linear_enabled is True
+    - "graphiti" → only if GRAPHITI_MCP_URL is set
+    """
+```
+
+#### Browser Tool Selection
+
+QA agents get browser automation tools based on project type:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        BROWSER TOOL SELECTION                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Project Type Detection                                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────┐                                                        │
+│  │ is_electron?    │──Yes──► Electron MCP Server                           │
+│  └────────┬────────┘         • get_electron_window_info                    │
+│           │ No               • take_screenshot                             │
+│           ▼                  • send_command_to_electron                    │
+│  ┌─────────────────┐         • read_electron_logs                          │
+│  │ is_web_frontend?│──Yes──► Puppeteer MCP Server                          │
+│  └────────┬────────┘         • puppeteer_connect_active_tab                │
+│           │ No               • puppeteer_navigate                          │
+│           ▼                  • puppeteer_screenshot                        │
+│  No browser tools            • puppeteer_click, fill, evaluate             │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Claude SDK Integration
+
+All AI interactions go through the Claude Agent SDK client, configured in `core/client.py`.
+
+#### Client Factory Function
+
+The `create_client()` function is the entry point for creating configured SDK clients:
+
+```python
+# core/client.py - Simplified client creation
+def create_client(
+    project_dir: Path,
+    spec_dir: Path,
+    model: str,
+    agent_type: str = "coder",
+    max_thinking_tokens: int | None = None,
+    output_format: dict | None = None,
+    agents: dict | None = None,
+) -> ClaudeSDKClient:
+    """
+    Create a Claude Agent SDK client with multi-layered security.
+
+    Uses AGENT_CONFIGS for phase-aware tool and MCP server configuration.
+    Only starts MCP servers that the agent actually needs, reducing context
+    window bloat and startup latency.
+    """
+    # 1. Get OAuth token (never raw API keys)
+    oauth_token = require_auth_token()
+
+    # 2. Get allowed tools from AGENT_CONFIGS
+    allowed_tools_list = get_allowed_tools(agent_type, project_capabilities, ...)
+
+    # 3. Get required MCP servers
+    required_servers = get_required_mcp_servers(agent_type, project_capabilities, ...)
+
+    # 4. Configure security settings
+    security_settings = {
+        "sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True},
+        "permissions": {
+            "defaultMode": "acceptEdits",
+            "allow": [
+                "Read(./**)", "Write(./**)", "Edit(./**)", ...
+            ],
+        },
+    }
+
+    # 5. Build SDK options
+    return ClaudeSDKClient(options=ClaudeAgentOptions(
+        model=model,
+        system_prompt=base_prompt,
+        allowed_tools=allowed_tools_list,
+        mcp_servers=mcp_servers,
+        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[bash_security_hook])]},
+        max_turns=1000,
+        cwd=str(project_dir),
+        max_thinking_tokens=max_thinking_tokens,
+        max_buffer_size=10 * 1024 * 1024,  # 10MB for large tool results
+        enable_file_checkpointing=True,
+    ))
+```
+
+#### SDK Client Options
+
+Key options passed to `ClaudeAgentOptions`:
+
+| Option | Purpose |
+|--------|---------|
+| `model` | Claude model to use (e.g., `claude-sonnet-4-5-20250929`) |
+| `system_prompt` | Base instructions including project path and CLAUDE.md content |
+| `allowed_tools` | Whitelist of tools this agent can use |
+| `mcp_servers` | Dict of MCP server configurations to start |
+| `hooks` | Security hooks (PreToolUse for Bash command validation) |
+| `max_turns` | Maximum API round-trips (default: 1000) |
+| `cwd` | Working directory for the agent |
+| `max_thinking_tokens` | Extended thinking budget (None = disabled) |
+| `max_buffer_size` | Buffer size for tool results (10MB to handle large outputs) |
+| `enable_file_checkpointing` | Track file read/write state across tool calls |
+
+#### Extended Thinking Levels
+
+Extended thinking allows Claude to reason more deeply before responding:
+
+| Level | Tokens | Use Case | Agents |
+|-------|--------|----------|--------|
+| `none` | Disabled | Fast responses, coding | Coder |
+| `low` | — | Simple analysis | Merge resolver, Commit message |
+| `medium` | 5,000 | Moderate reasoning | Spec gatherer, QA fixer |
+| `high` | 10,000 | Complex analysis | Planner, QA reviewer |
+| `ultrathink` | 16,000 | Deep self-critique | Spec critic |
+
+### Phase-Aware Tool Configuration
+
+The key architectural pattern is **phase-aware tool configuration**—each agent type only gets the tools and MCP servers it needs for its specific task.
+
+#### Benefits
+
+1. **Reduced Context Bloat** - Fewer tool descriptions means more room for actual work
+2. **Faster Startup** - Only required MCP servers are started
+3. **Least Privilege** - Agents can't misuse tools they don't have access to
+4. **Clearer Intent** - Tool availability signals expected behavior
+
+#### Configuration Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     PHASE-AWARE TOOL CONFIGURATION FLOW                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. Agent Type Selected                                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│  2. AGENT_CONFIGS Lookup                                                    │
+│     ├── tools: [Read, Write, Edit, Bash, ...]                              │
+│     ├── mcp_servers: [context7, graphiti, auto-claude]                     │
+│     ├── mcp_servers_optional: [linear]                                     │
+│     └── thinking_default: "high"                                           │
+│         │                                                                   │
+│         ▼                                                                   │
+│  3. Dynamic Resolution                                                      │
+│     ├── Check project capabilities (is_electron, is_web_frontend)          │
+│     ├── Check integration status (LINEAR_API_KEY, GRAPHITI_MCP_URL)        │
+│     └── Check per-project config (.auto-claude/.env)                       │
+│         │                                                                   │
+│         ▼                                                                   │
+│  4. Final Tool List + MCP Servers                                          │
+│         │                                                                   │
+│         ▼                                                                   │
+│  5. Create SDK Client with Configuration                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Example: QA Reviewer vs Coder
+
+| Aspect | QA Reviewer | Coder |
+|--------|-------------|-------|
+| **Tools** | Read + Write + Web | Read + Write + Web |
+| **MCP Servers** | context7, graphiti, auto-claude, **browser** | context7, graphiti, auto-claude |
+| **Auto-Claude Tools** | get_build_progress, update_qa_status, get_session_context | update_subtask_status, get_build_progress, record_discovery, record_gotcha, get_session_context |
+| **Thinking** | high (10,000 tokens) | none (fast responses) |
+
+The QA Reviewer gets browser automation tools for UI testing, while the Coder focuses on implementation without browser overhead.
+
+### Custom MCP Server Support
+
+Projects can define custom MCP servers in `.auto-claude/.env`:
+
+```bash
+# .auto-claude/.env
+CUSTOM_MCP_SERVERS='[
+  {
+    "id": "my-docs",
+    "name": "My Documentation Server",
+    "type": "http",
+    "url": "http://localhost:3000/mcp"
+  },
+  {
+    "id": "my-tool",
+    "name": "My Custom Tool",
+    "type": "command",
+    "command": "npx",
+    "args": ["my-mcp-tool"]
+  }
+]'
+
+# Enable for specific agents
+AGENT_MCP_coder_ADD=my-docs,my-tool
+AGENT_MCP_qa_reviewer_ADD=my-docs
+```
+
+#### Security Validation
+
+Custom MCP servers are validated before use:
+
+- **Command type**: Only safe commands allowed (`npx`, `npm`, `node`, `python`, `uv`)
+- **Dangerous commands blocked**: `bash`, `sh`, `cmd`, `powershell` are rejected
+- **Dangerous flags blocked**: `--eval`, `-c`, `-e`, `-m` are rejected
+- **HTTP type**: URL must be valid, headers must be string key-value pairs
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

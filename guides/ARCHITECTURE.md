@@ -2343,4 +2343,450 @@ When extending Auto Claude or adding custom integrations:
 
 ---
 
+## Workspace Isolation
+
+Auto Claude uses **git worktrees** for isolated feature development, ensuring the user's main working directory is never affected by AI-generated code until explicitly merged. This "isolation-first" approach provides safety, reversibility, and clean separation between human work and AI-generated changes.
+
+### Why Workspace Isolation?
+
+Traditional AI coding assistants modify files directly in your working directory. This creates several problems:
+
+| Issue | Direct Modification | Worktree Isolation |
+|-------|--------------------|--------------------|
+| Uncommitted work | Can be overwritten or mixed with AI changes | User's files untouched |
+| Review process | Mixed with your changes, hard to isolate | Clean diff of AI changes only |
+| Rollback | Manual git operations, risk of data loss | Simple discard or delete branch |
+| Parallel work | Conflicts with human edits | Separate workspace, no conflicts |
+| Testing | Must test in main workspace | Test in isolation first |
+
+### Workspace Architecture
+
+Auto Claude creates a **1:1:1 mapping** between specs, worktrees, and branches:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        WORKSPACE ISOLATION ARCHITECTURE                           │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  User's Project Directory (/my-project/)                                        │
+│  ├── .auto-claude/                                                              │
+│  │   ├── specs/                                                                 │
+│  │   │   └── 001-add-auth/          ◄── Spec artifacts (shared)                │
+│  │   │       ├── spec.md                                                        │
+│  │   │       ├── implementation_plan.json                                       │
+│  │   │       ├── qa_report.md                                                  │
+│  │   │       └── build-progress.txt                                            │
+│  │   │                                                                          │
+│  │   └── worktrees/                                                            │
+│  │       └── tasks/                                                            │
+│  │           └── 001-add-auth/      ◄── Isolated worktree                      │
+│  │               ├── src/           (full project copy)                        │
+│  │               ├── package.json                                              │
+│  │               └── ...                                                       │
+│  │                                                                              │
+│  ├── src/                           ◄── User's working directory (untouched)  │
+│  ├── package.json                                                              │
+│  └── .git/                          ◄── Shared git repository                  │
+│                                                                                  │
+│  Branch Structure:                                                              │
+│  ├── main (or master)               ◄── User's branch                          │
+│  └── auto-claude/001-add-auth       ◄── Worktree branch (AI changes)          │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Locations:**
+
+| Path | Purpose |
+|------|---------|
+| `.auto-claude/specs/{spec-name}/` | Spec artifacts (spec.md, plan, QA reports) - shared with worktree |
+| `.auto-claude/worktrees/tasks/{spec-name}/` | Isolated worktree with full project copy |
+| `auto-claude/{spec-name}` | Branch name for worktree (e.g., `auto-claude/001-add-auth`) |
+
+### Workspace Modes
+
+Auto Claude supports two workspace modes, with **ISOLATED** being the recommended default:
+
+#### ISOLATED Mode (Recommended)
+
+AI works in a separate git worktree. User's files remain untouched.
+
+```python
+# core/workspace/models.py
+class WorkspaceMode(Enum):
+    ISOLATED = "isolated"  # Worktree-based isolation
+    DIRECT = "direct"      # Direct modification (no worktree)
+```
+
+**When ISOLATED mode is auto-selected:**
+- User has uncommitted changes in their working directory
+- User explicitly requests isolated mode
+- Default behavior for new builds
+
+**Benefits:**
+- Clean separation of AI and human work
+- Easy review before merging
+- Simple rollback (just delete worktree)
+- Can test AI changes without affecting main workspace
+
+#### DIRECT Mode
+
+Changes happen directly in user's working directory. Use when:
+- Quick fixes that don't warrant isolation
+- User explicitly opts out of isolation
+- Working on a branch already dedicated to this task
+
+### Worktree Lifecycle
+
+#### Phase 1: Creation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        WORKTREE CREATION FLOW                                     │
+│                        (core/worktree.py)                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Check for namespace conflicts                                               │
+│     └── e.g., branch "auto-claude" would block "auto-claude/*"                  │
+│                                                                                  │
+│  2. Clean up existing worktree/branch (if present from crashed run)            │
+│     ├── git worktree remove --force {path}                                      │
+│     └── git branch -D {branch-name}                                            │
+│                                                                                  │
+│  3. Fetch latest from remote                                                    │
+│     └── Ensures up-to-date base for new worktree                               │
+│                                                                                  │
+│  4. Create worktree with new branch                                             │
+│     └── git worktree add -b {branch-name} {path} {start-point}                 │
+│                                                                                  │
+│  5. Base branch selection priority:                                             │
+│     ├── DEFAULT_BRANCH env var (if set)                                        │
+│     ├── origin/main (if exists)                                                │
+│     ├── origin/master (if exists)                                              │
+│     └── Current branch (with warning)                                          │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Implementation:**
+
+```python
+# core/worktree.py - WorktreeManager.create_worktree()
+def create_worktree(
+    self,
+    worktree_path: Path,
+    branch_name: str,
+    spec_name: str | None = None,
+    force: bool = False,
+    start_point: str | None = None,
+) -> Path:
+    """
+    Create a new git worktree for isolated development.
+
+    - Prefers origin/{base_branch} as start point (source of truth)
+    - Falls back to local {base_branch} if remote not available
+    - Handles existing worktree cleanup for recovery scenarios
+    """
+```
+
+#### Phase 2: Environment Setup
+
+After creating the worktree, Auto Claude replicates the development environment:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        ENVIRONMENT SETUP                                          │
+│                        (core/workspace/setup.py)                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Copy .env files                                                             │
+│     ├── .env, .env.local, .env.development, etc.                               │
+│     └── Preserves existing worktree .env (no overwrite)                        │
+│                                                                                  │
+│  2. Symlink node_modules                                                        │
+│     ├── Windows: Directory junction (mklink /J)                                │
+│     └── Unix: Symlink                                                          │
+│     └── Provides TypeScript support without npm install                        │
+│                                                                                  │
+│  3. Copy security configuration                                                 │
+│     ├── .auto-claude-security.json                                             │
+│     ├── .auto-claude-allowlist                                                 │
+│     └── Marks as inherited (prevents re-analysis)                              │
+│                                                                                  │
+│  4. Update worktree .gitignore                                                  │
+│     └── Ensures .auto-claude/ is ignored in worktree                          │
+│                                                                                  │
+│  5. Copy spec files to worktree                                                 │
+│     └── Agent needs spec artifacts during build                                │
+│                                                                                  │
+│  6. Initialize FileTimelineTracker                                              │
+│     └── Git post-commit hook for merge conflict resolution                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Symlink Strategy:**
+
+```python
+# core/workspace/setup.py
+def _symlink_node_modules(source: Path, target: Path) -> bool:
+    """
+    Symlink node_modules for TypeScript language server support.
+
+    Windows: Uses directory junction (mklink /J) - works without admin
+    Unix: Uses standard symlink
+
+    Benefits:
+    - No npm install required in worktree
+    - TypeScript intellisense works immediately
+    - Saves disk space and setup time
+    """
+```
+
+#### Phase 3: Build Execution
+
+During the build, agents work entirely within the worktree:
+
+- **Working Directory**: `.auto-claude/worktrees/tasks/{spec-name}/`
+- **Commits**: Made to `auto-claude/{spec-name}` branch
+- **Spec Access**: Reads from `.auto-claude/specs/{spec-name}/` (symlinked or accessible)
+- **Progress Tracking**: Updates `build-progress.txt` in spec directory
+
+#### Phase 4: Finalization
+
+After the build completes, users choose how to handle the changes:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        FINALIZATION OPTIONS                                       │
+│                        (core/workspace/finalization.py)                          │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  [Test] ────► Keep worktree, show instructions to run app in worktree          │
+│               "cd .auto-claude/worktrees/tasks/001-add-auth && npm run dev"     │
+│                                                                                  │
+│  [Review] ──► Show changed files and diff summary                               │
+│               Displays list of modified/added/deleted files                     │
+│                                                                                  │
+│  [Merge] ───► Integrate changes into base branch                                │
+│               ├── Conflict check via git merge-tree (non-destructive)          │
+│               ├── Merge with --no-ff for clear history                         │
+│               └── Optional --no-commit for staged review                       │
+│                                                                                  │
+│  [Later] ───► Preserve worktree for later decision                              │
+│               Worktree and branch remain intact                                 │
+│                                                                                  │
+│  [Discard] ─► Delete worktree and branch                                        │
+│               ├── Requires typing "delete" to confirm                          │
+│               ├── git worktree remove --force                                  │
+│               └── git branch -D                                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Branching Strategy
+
+#### Branch Naming Convention
+
+| Branch Type | Pattern | Example |
+|-------------|---------|---------|
+| Spec branches | `auto-claude/{spec-name}` | `auto-claude/001-add-auth` |
+| PR review worktrees | `pr-{number}-{sha}-{timestamp}` | `pr-123-a1b2c3d-1705432800` |
+
+#### Branch Lifecycle Principles
+
+1. **ONE branch per spec** - No sub-branches or parallel branches per spec
+2. **NO automatic pushes** - All branches stay LOCAL until user explicitly pushes
+3. **Parallel work uses subagents** - Within the same worktree, not separate branches
+4. **User controls integration** - Merge happens only when user approves
+
+```
+Branch Topology:
+
+main ─────────────────────────────────────────────────────────► (user's branch)
+   │
+   └── auto-claude/001-add-auth ──────────────────► (spec worktree branch)
+                                                      │
+                                                      └── [User approves]
+                                                           │
+                                                           ▼
+main ◄────────────────────────── merge ◄──────────────────┘
+```
+
+#### Base Branch Detection
+
+Auto Claude automatically detects the appropriate base branch:
+
+```python
+# core/worktree.py
+def get_default_base_branch(self) -> str:
+    """
+    Detect default base branch with priority:
+    1. DEFAULT_BRANCH env var (explicit override)
+    2. 'main' (if exists locally or on remote)
+    3. 'master' (if exists locally or on remote)
+    4. Current branch (with warning)
+    """
+```
+
+### Merge Operations
+
+#### Standard Merge
+
+```bash
+# Executed by merge_worktree()
+git checkout {base_branch}
+git merge --no-ff auto-claude/{spec-name} -m "Merge feature: {spec-name}"
+```
+
+**`--no-ff` rationale**: Creates explicit merge commit even for fast-forward merges, providing clear history of when features were integrated.
+
+#### Staged Merge Workflow
+
+For users who want to review changes before committing:
+
+```python
+# core/workspace/finalization.py
+def merge_worktree_staged(self, worktree_path: Path) -> MergeResult:
+    """
+    Merge with --no-commit for staged review.
+
+    Flow:
+    1. Merge with --no-commit (stages changes but doesn't commit)
+    2. Unstage gitignored files and .auto-claude/ directory
+    3. User reviews staged changes
+    4. User commits when ready (or resets to abort)
+    """
+```
+
+#### Conflict Detection
+
+Auto Claude uses **non-destructive conflict detection** to preview merge issues:
+
+```python
+# core/worktree.py
+def _check_git_merge_conflicts(self, branch_name: str) -> tuple[bool, list[str]]:
+    """
+    Check for merge conflicts WITHOUT modifying working directory.
+
+    Uses: git merge-tree --write-tree HEAD {branch}
+
+    Benefits:
+    - Doesn't trigger HMR/file watchers
+    - Doesn't modify any files
+    - Returns list of conflicting files
+    - Safe to run at any time
+    """
+```
+
+**Conflict Handling:**
+- If conflicts detected: Abort merge, preserve worktree, notify user
+- User can resolve conflicts manually in worktree, then retry merge
+- FileTimelineTracker helps identify intent for conflict resolution
+
+### Parallel Task Conflict Detection
+
+When multiple specs run in parallel, Auto Claude tracks file modifications to detect potential conflicts:
+
+```python
+# core/workspace/timeline.py
+class FileTimelineTracker:
+    """
+    Tracks file modifications across parallel tasks.
+
+    - Installs git post-commit hook to record commits
+    - Maintains timeline of which tasks modified which files
+    - Detects when parallel tasks modify the same files
+    - Provides hints for conflict resolution
+    """
+```
+
+**Timeline Events:**
+- Task start (records base state)
+- Each commit (records modified files)
+- Human commits (recorded via post-commit hook)
+- Task completion (summarizes all modifications)
+
+### Cleanup and Maintenance
+
+#### Automatic Cleanup
+
+Auto Claude provides cleanup commands for managing worktrees:
+
+```bash
+# List all spec worktrees
+python run.py --list-worktrees
+
+# Clean up all worktrees (with confirmation)
+python run.py --cleanup-worktrees
+
+# Clean up worktrees older than 30 days
+python run.py --cleanup-worktrees --age 30
+```
+
+#### Cleanup Policies
+
+```python
+# core/worktree.py
+def cleanup_old_worktrees(self, max_age_days: int = 30) -> list[str]:
+    """
+    Remove worktrees older than specified age.
+
+    Default retention:
+    - Task worktrees: 30 days
+    - PR worktrees: 7 days
+
+    Also removes orphaned directories not registered with git.
+    """
+```
+
+#### PR Worktree Management
+
+PR review worktrees have separate lifecycle management:
+
+```python
+# runners/github/services/pr_worktree_manager.py
+class PRWorktreeManager:
+    """
+    Manages worktrees for PR review operations.
+
+    - Creates detached HEAD worktree at PR commit
+    - Limits number of concurrent PR worktrees (default: 10)
+    - Auto-cleanup based on age (default: 7 days)
+    """
+```
+
+### Legacy Worktree Support
+
+Auto Claude maintains backward compatibility with older worktree locations:
+
+| Version | Worktree Location |
+|---------|-------------------|
+| Legacy | `.worktrees/{spec-name}/` |
+| Current | `.auto-claude/worktrees/tasks/{spec-name}/` |
+
+Both locations are checked when searching for existing worktrees, ensuring seamless upgrades.
+
+### Cross-Platform Considerations
+
+Worktree operations are designed to work across Windows, macOS, and Linux:
+
+| Operation | Windows | Unix |
+|-----------|---------|------|
+| Symlink node_modules | Directory junction (`mklink /J`) | Symlink |
+| Path separators | Normalized to `/` for git | Native |
+| File permissions | Limited support | Full support |
+| Case sensitivity | Case-insensitive | Case-sensitive |
+
+### Worktree Best Practices
+
+1. **Use ISOLATED mode** for any non-trivial work
+2. **Test in worktree** before merging - run the app, run tests
+3. **Review changes** using `--review` before merging
+4. **Don't fear discard** - worktrees are cheap, start fresh if needed
+5. **Clean up periodically** - old worktrees consume disk space
+6. **Push when ready** - branches are local until you explicitly push
+
+---
+
 <!-- Subsequent sections will be added in following subtasks -->

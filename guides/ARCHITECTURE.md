@@ -4881,4 +4881,164 @@ C4Deployment
 
 ---
 
-<!-- Subsequent diagrams (Spec Creation Flow, Implementation Pipeline, Agent-Tool-MCP) will be added in following subtasks -->
+### Spec Creation Flow Diagram
+
+This diagram illustrates the complete spec creation pipeline, showing how tasks flow through complexity-adaptive phases from user input to implementation plan ready for build.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e8f5e9', 'primaryTextColor': '#1b5e20', 'primaryBorderColor': '#2e7d32', 'lineColor': '#455a64', 'secondaryColor': '#fff8e1', 'tertiaryColor': '#e1f5fe'}}}%%
+
+flowchart TB
+    %% ===== ENTRY POINT =====
+    UserTask([🎯 User Task<br/>Description]) --> SpecRunner
+
+    subgraph EntryPoint["📥 Entry Point"]
+        SpecRunner["spec_runner.py<br/>─────────────<br/>Interactive or CLI<br/>--task flag"]
+    end
+
+    %% ===== DISCOVERY PHASE =====
+    SpecRunner --> Discovery
+
+    subgraph DiscoveryPhase["🔍 Phase 1: Discovery"]
+        Discovery["analyze_project()<br/>─────────────<br/>Scan project structure<br/>Detect tech stack<br/>Identify capabilities"]
+        Discovery --> ProjectIndex[(project_index.json)]
+    end
+
+    %% ===== REQUIREMENTS PHASE =====
+    ProjectIndex --> Requirements
+
+    subgraph RequirementsPhase["📋 Phase 2: Requirements"]
+        Requirements["spec_gatherer.md Agent<br/>─────────────<br/>Interactive Q&A<br/>Collect acceptance criteria<br/>Identify constraints"]
+        Requirements --> ReqFile[(requirements.json)]
+    end
+
+    %% ===== COMPLEXITY ASSESSMENT =====
+    ReqFile --> ComplexityAssess
+
+    subgraph ComplexityPhase["🎚️ Phase 3: Complexity Assessment"]
+        ComplexityAssess["complexity_assessor.md<br/>─────────────<br/>AI Analysis + Heuristics<br/>Task scope evaluation"]
+        ComplexityAssess --> ComplexityDecision{Complexity<br/>Tier?}
+    end
+
+    %% ===== SIMPLE TIER =====
+    ComplexityDecision -->|"SIMPLE<br/>(4 phases)"| SimpleStart
+
+    subgraph SimpleTier["🟢 SIMPLE Workflow"]
+        direction TB
+        SimpleStart["Historical Context<br/>Query Graphiti"] --> QuickSpec
+        QuickSpec["spec_quick.md Agent<br/>─────────────<br/>Combined spec + plan<br/>Streamlined for small tasks"]
+        QuickSpec --> SimpleValidate["Validation<br/>SpecValidator"]
+    end
+
+    %% ===== STANDARD TIER =====
+    ComplexityDecision -->|"STANDARD<br/>(7 phases)"| StandardStart
+
+    subgraph StandardTier["🟡 STANDARD Workflow"]
+        direction TB
+        StandardStart["Historical Context<br/>Query Graphiti"] --> StdContext
+        StdContext["Context Analysis<br/>─────────────<br/>Identify relevant files<br/>Extract patterns"]
+        StdContext --> StdSpec["spec_writer.md Agent<br/>─────────────<br/>Create detailed spec<br/>Define technical approach"]
+        StdSpec --> StdPlan["planner.md Agent<br/>─────────────<br/>Create implementation plan<br/>Define subtasks"]
+        StdPlan --> StdValidate["Validation<br/>SpecValidator"]
+    end
+
+    %% ===== COMPLEX TIER =====
+    ComplexityDecision -->|"COMPLEX<br/>(9 phases)"| ComplexStart
+
+    subgraph ComplexTier["🔴 COMPLEX Workflow"]
+        direction TB
+        ComplexStart["Historical Context<br/>Query Graphiti"] --> Research
+        Research["spec_researcher.md Agent<br/>─────────────<br/>Validate integrations<br/>Check API compatibility<br/>Uses Context7 MCP"]
+        Research --> CplxContext["Context Analysis<br/>─────────────<br/>Deep file analysis<br/>Dependency mapping"]
+        CplxContext --> CplxSpec["spec_writer.md Agent<br/>─────────────<br/>Comprehensive spec<br/>API contracts"]
+        CplxSpec --> Critique["spec_critic.md Agent<br/>─────────────<br/>Self-review (ultrathink)<br/>Identify gaps"]
+        Critique --> CplxPlan["planner.md Agent<br/>─────────────<br/>Detailed subtask plan<br/>Phase dependencies"]
+        CplxPlan --> CplxValidate["Validation<br/>SpecValidator"]
+    end
+
+    %% ===== CONVERGENCE =====
+    SimpleValidate --> OutputFiles
+    StdValidate --> OutputFiles
+    CplxValidate --> OutputFiles
+
+    subgraph OutputArtifacts["📁 Output Artifacts"]
+        OutputFiles[(Spec Directory<br/>─────────────<br/>spec.md<br/>requirements.json<br/>context.json<br/>implementation_plan.json)]
+    end
+
+    %% ===== HUMAN REVIEW =====
+    OutputFiles --> HumanReview
+
+    subgraph ReviewCheckpoint["👤 Human Review Checkpoint"]
+        HumanReview["Review Spec & Plan<br/>─────────────<br/>Verify understanding<br/>Check approach"]
+        HumanReview --> ApprovalDecision{Approved?}
+        ApprovalDecision -->|No| EditSpec["Edit spec.md<br/>or requirements"]
+        EditSpec --> HumanReview
+    end
+
+    %% ===== HANDOFF =====
+    ApprovalDecision -->|Yes| BuildHandoff([✅ Start Build<br/>Implementation Pipeline])
+
+    %% ===== STYLING =====
+    classDef entry fill:#bbdefb,stroke:#1565c0,stroke-width:2px
+    classDef discovery fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
+    classDef requirements fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef complexity fill:#ffe0b2,stroke:#e65100,stroke-width:2px
+    classDef simple fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    classDef standard fill:#fff8e1,stroke:#ffa000,stroke-width:2px
+    classDef complex fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef output fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef review fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef endpoint fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+
+    class SpecRunner entry
+    class Discovery discovery
+    class Requirements requirements
+    class ComplexityAssess complexity
+    class SimpleStart,QuickSpec,SimpleValidate simple
+    class StandardStart,StdContext,StdSpec,StdPlan,StdValidate standard
+    class ComplexStart,Research,CplxContext,CplxSpec,Critique,CplxPlan,CplxValidate complex
+    class OutputFiles output
+    class HumanReview,EditSpec review
+    class UserTask,BuildHandoff endpoint
+```
+
+#### Spec Creation Phase Summary
+
+| Phase | SIMPLE | STANDARD | COMPLEX | Purpose |
+|-------|:------:|:--------:|:-------:|---------|
+| **Discovery** | ✓ | ✓ | ✓ | Project analysis, capability detection |
+| **Requirements** | ✓ | ✓ | ✓ | Task collection, acceptance criteria |
+| **Complexity Assessment** | ✓ | ✓ | ✓ | Route to appropriate workflow |
+| **Historical Context** | ✓ | ✓ | ✓ | Query Graphiti for past patterns |
+| **Research** | — | — | ✓ | Validate external integrations |
+| **Context Analysis** | — | ✓ | ✓ | Identify relevant files and patterns |
+| **Spec Writing** | — | ✓ | ✓ | Create detailed specification |
+| **Self-Critique** | — | — | ✓ | Review spec with extended thinking |
+| **Quick Spec** | ✓ | — | — | Combined spec+plan for simple tasks |
+| **Planning** | — | ✓ | ✓ | Create implementation plan |
+| **Validation** | ✓ | ✓ | ✓ | Verify all required files exist |
+
+#### Complexity Tier Decision Factors
+
+The complexity assessor evaluates:
+
+1. **Code Scope**: Number of files and services affected
+2. **Integration Depth**: External APIs, databases, third-party services
+3. **Architectural Impact**: New patterns, significant refactoring
+4. **Risk Level**: Breaking changes, security implications
+5. **Dependencies**: Cross-service communication, shared state
+
+#### Phase Compaction for Context Management
+
+To prevent context window exhaustion during complex workflows:
+
+```
+Phase 1 Output (2000 words) ──► Compaction ──► Summary (500 words)
+Phase 2 Output (3000 words) ──► Compaction ──► Summary (500 words)
+...
+Phase N receives: All prior summaries + full Phase N-1 output
+```
+
+This enables the 9-phase COMPLEX workflow to complete without running out of context.
+
+<!-- Subsequent diagrams (Implementation Pipeline, Agent-Tool-MCP) will be added in following subtasks -->

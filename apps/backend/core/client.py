@@ -45,17 +45,20 @@ _CACHE_LOCK = threading.Lock()  # Protects _PROJECT_INDEX_CACHE access
 
 
 def _get_cached_project_data(
-    project_dir: Path,
+    project_dir: Path | str,
 ) -> tuple[dict[str, Any], dict[str, bool]]:
     """
     Get project index and capabilities with caching.
 
     Args:
-        project_dir: Path to the project directory
+        project_dir: Path to the project directory (accepts str for backwards compatibility)
 
     Returns:
         Tuple of (project_index, project_capabilities)
     """
+    # Ensure project_dir is a Path object (handles string inputs)
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir)
 
     key = str(project_dir.resolve())
     now = time.time()

@@ -157,11 +157,17 @@ def cmd_plan(args) -> int:
     brief_path = spec_dir / "spec.md"
     brief_path.write_text(f"# Content Brief\n\n{args.task}\n")
 
+    # Resolve model via API Profile if configured
+    from phase_config import resolve_model_id
+    resolved_model = resolve_model_id(args.model)
+
     # Run the planner
     planner = ContentPlannerAgent(
         project_dir=str(project_dir),
         spec_dir=str(spec_dir),
         project_type=project_type,
+        model=resolved_model,
+        thinking_level=args.thinking,
     )
 
     print(f"\nCreating content plan...")
@@ -589,6 +595,20 @@ def main():
         "--auto-approve",
         action="store_true",
         help="Skip human review and automatically execute the plan after creation",
+    )
+
+    # Model configuration
+    parser.add_argument(
+        "--model", "-m",
+        default="sonnet",
+        help="Model to use (sonnet, opus, haiku, or full model ID)",
+    )
+
+    parser.add_argument(
+        "--thinking",
+        default="medium",
+        choices=["none", "low", "medium", "high", "ultrathink"],
+        help="Extended thinking level (default: medium)",
     )
 
     # Parse arguments

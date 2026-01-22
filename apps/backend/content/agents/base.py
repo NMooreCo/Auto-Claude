@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional, Any
 import logging
 
+from phase_config import get_thinking_budget
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,11 +28,15 @@ class ContentAgent(ABC):
     # Default model to use
     DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
 
+    # Default thinking level for extended thinking
+    DEFAULT_THINKING_LEVEL: str = "medium"
+
     def __init__(
         self,
         project_dir: str,
         spec_dir: Optional[str] = None,
         model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ):
         """
         Initialize the content agent.
@@ -39,10 +45,12 @@ class ContentAgent(ABC):
             project_dir: Path to the content project directory
             spec_dir: Optional path to the spec directory for this task
             model: Optional model override (defaults to DEFAULT_MODEL)
+            thinking_level: Optional thinking level (none, low, medium, high, ultrathink)
         """
         self.project_dir = Path(project_dir)
         self.spec_dir = Path(spec_dir) if spec_dir else None
         self.model = model or self.DEFAULT_MODEL
+        self.thinking_level = thinking_level or self.DEFAULT_THINKING_LEVEL
 
         # Validate project directory exists
         if not self.project_dir.exists():
@@ -74,11 +82,15 @@ class ContentAgent(ABC):
         # Import here to avoid circular imports
         from core.client import create_client
 
+        # Convert thinking level to token budget
+        thinking_budget = get_thinking_budget(self.thinking_level)
+
         return create_client(
             project_dir=str(self.project_dir),
             spec_dir=str(self.spec_dir) if self.spec_dir else None,
             model=self.model,
             agent_type=self.AGENT_TYPE,
+            max_thinking_tokens=thinking_budget,
         )
 
     def _create_session(self, starting_message: str, session_name: Optional[str] = None) -> str:

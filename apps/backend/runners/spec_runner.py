@@ -94,10 +94,25 @@ load_dotenv = import_dotenv()
 
 env_file = Path(__file__).parent.parent / ".env"
 dev_env_file = Path(__file__).parent.parent.parent / "dev" / "auto-claude" / ".env"
+
+# DEBUG: Log ANTHROPIC_* env vars BEFORE loading .env
+print("[spec_runner] BEFORE load_dotenv - ANTHROPIC env vars:")
+for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL"]:
+    val = os.environ.get(key, "<NOT SET>")
+    print(f"  {key}={val[:50] if val != '<NOT SET>' else val}...")
+
 if env_file.exists():
     load_dotenv(env_file)
 elif dev_env_file.exists():
     load_dotenv(dev_env_file)
+
+# DEBUG: Log ANTHROPIC_* env vars AFTER loading .env
+print("[spec_runner] AFTER load_dotenv - ANTHROPIC env vars:")
+for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL"]:
+    val = os.environ.get(key, "<NOT SET>")
+    print(f"  {key}={val[:50] if val != '<NOT SET>' else val}...")
 
 # Initialize Sentry early to capture any startup errors
 from core.sentry import capture_exception, init_sentry
@@ -288,6 +303,9 @@ Examples:
                     project=str(project_dir),
                     task=task_description,
                     spec=None,
+                    model=args.model,
+                    thinking=args.thinking_level,
+                    spec_dir=args.spec_dir,
                 )
 
                 debug(

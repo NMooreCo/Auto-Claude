@@ -30,6 +30,7 @@ class ContentPlannerAgent(ContentAgent):
         spec_dir: Optional[str] = None,
         model: Optional[str] = None,
         project_type: Optional[ContentProjectType] = None,
+        thinking_level: Optional[str] = None,
     ):
         """
         Initialize the Content Planner agent.
@@ -39,8 +40,9 @@ class ContentPlannerAgent(ContentAgent):
             spec_dir: Optional path to the spec directory
             model: Optional model override
             project_type: Optional project type (auto-detected if not provided)
+            thinking_level: Optional thinking level (none, low, medium, high, ultrathink)
         """
-        super().__init__(project_dir, spec_dir, model)
+        super().__init__(project_dir, spec_dir, model, thinking_level)
         self.project_type = project_type
 
     def run(

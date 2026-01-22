@@ -121,6 +121,9 @@ class ContentProjectDetector:
         "implement", "fix", "bug", "refactor", "test", "deploy",
         "function", "class", "method", "api", "endpoint", "database",
         "error", "exception", "performance", "optimize", "debug",
+        # Additional code task indicators
+        "defect", "issue", "patch", "hotfix", "update", "upgrade",
+        "feature", "component", "module", "service", "integration",
     ]
 
     def detect(self, project_dir: str) -> ContentProjectType:
@@ -212,9 +215,19 @@ class ContentProjectDetector:
         if code_score > content_score + 1:
             return False
 
-        # Ambiguous - check for specific project type match
-        detected_type = self.detect_from_description(description)
-        return detected_type != ContentProjectType.GENERAL
+        # If there are ANY code keywords, treat as code task (safe default)
+        # This prevents tasks like "defect" from being routed to content mode
+        if code_score > 0:
+            return False
+
+        # Only check for content project type if no code indicators at all
+        # AND there are some content indicators
+        if content_score > 0:
+            detected_type = self.detect_from_description(description)
+            return detected_type != ContentProjectType.GENERAL
+
+        # No clear indicators either way - default to code task
+        return False
 
     def detect_combined(
         self, project_dir: str, description: Optional[str] = None
